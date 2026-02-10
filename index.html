@@ -1,0 +1,243 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <link rel="icon" type="image/svg+xml" href="https://lucide.dev/icons/brain-circuit.svg" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>NeuroNote AI</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script>
+      tailwind.config = {
+        darkMode: 'class',
+        theme: {
+          extend: {
+            colors: {
+              neuro: {
+                bg: '#0f172a',       /* Slate 900 */
+                surface: '#1e293b',  /* Slate 800 */
+                surfaceHighlight: '#334155', /* Slate 700 */
+                primary: '#818cf8',  /* Indigo 400 */
+                primaryHover: '#6366f1',
+                text: '#f1f5f9',     /* Slate 100 */
+                textMuted: '#94a3b8', /* Slate 400 */
+                accent: '#38bdf8',   /* Sky 400 */
+                danger: '#f43f5e',
+                success: '#10b981'
+              }
+            },
+            fontFamily: {
+              sans: ['Inter', 'sans-serif'],
+              mono: ['JetBrains Mono', 'monospace'],
+            },
+            animation: {
+              'fade-in': 'fadeIn 0.5s ease-out',
+              'slide-up': 'slideUp 0.5s ease-out',
+            },
+            keyframes: {
+              fadeIn: {
+                '0%': { opacity: '0' },
+                '100%': { opacity: '1' },
+              },
+              slideUp: {
+                '0%': { transform: 'translateY(10px)', opacity: '0' },
+                '100%': { transform: 'translateY(0)', opacity: '1' },
+              }
+            }
+          }
+        }
+      }
+    </script>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+    <style>
+      body {
+        background-color: #0f172a;
+        color: #f1f5f9;
+        font-family: 'Inter', sans-serif;
+        -webkit-font-smoothing: antialiased;
+        -moz-osx-font-smoothing: grayscale;
+      }
+      
+      .glass-panel {
+        background: rgba(30, 41, 59, 0.7);
+        backdrop-filter: blur(12px);
+        -webkit-backdrop-filter: blur(12px);
+        border: 1px solid rgba(255, 255, 255, 0.08);
+      }
+
+      ::-webkit-scrollbar { width: 6px; height: 6px; }
+      ::-webkit-scrollbar-track { background: transparent; }
+      ::-webkit-scrollbar-thumb { background: #334155; border-radius: 10px; }
+      ::-webkit-scrollbar-thumb:hover { background: #475569; }
+
+      /* --- HIGH FIDELITY NOTE TYPOGRAPHY --- */
+      
+      .markdown-body {
+        font-size: 16px;
+        line-height: 1.8;
+        color: #cbd5e1;
+      }
+
+      /* Gradient Headings */
+      .markdown-body h1 {
+        font-size: 2.2em;
+        font-weight: 800;
+        margin-top: 1.5em;
+        margin-bottom: 0.8em;
+        padding-bottom: 0.4em;
+        border-bottom: 1px solid rgba(255,255,255,0.1);
+        background: linear-gradient(to right, #818cf8, #c084fc);
+        -webkit-background-clip: text;
+        -webkit-text-fill-color: transparent;
+        letter-spacing: -0.02em;
+      }
+
+      .markdown-body h2 {
+        font-size: 1.6em;
+        font-weight: 700;
+        margin-top: 1.8em;
+        margin-bottom: 0.8em;
+        color: #e2e8f0;
+        display: flex;
+        align-items: center;
+      }
+      
+      .markdown-body h2::before {
+        content: '#';
+        margin-right: 8px;
+        color: #818cf8;
+        font-weight: 300;
+        opacity: 0.6;
+      }
+
+      .markdown-body h3 {
+        font-size: 1.25em;
+        font-weight: 600;
+        margin-top: 1.5em;
+        margin-bottom: 0.6em;
+        color: #93c5fd; /* Light Blue */
+      }
+
+      /* Professional Tables */
+      .markdown-body table {
+        width: 100%;
+        border-collapse: separate;
+        border-spacing: 0;
+        margin: 2em 0;
+        border-radius: 8px;
+        overflow: hidden;
+        border: 1px solid rgba(255,255,255,0.1);
+        background: rgba(30, 41, 59, 0.3);
+      }
+      .markdown-body th {
+        background: rgba(15, 23, 42, 0.8);
+        color: #818cf8;
+        font-weight: 600;
+        padding: 12px 16px;
+        text-align: left;
+        border-bottom: 1px solid rgba(255,255,255,0.1);
+        text-transform: uppercase;
+        font-size: 0.85em;
+        letter-spacing: 0.05em;
+      }
+      .markdown-body td {
+        padding: 12px 16px;
+        border-bottom: 1px solid rgba(255,255,255,0.05);
+        color: #e2e8f0;
+        vertical-align: top;
+      }
+      .markdown-body tr:last-child td { border-bottom: none; }
+      .markdown-body tr:hover td { background: rgba(255,255,255,0.03); }
+
+      /* Lists */
+      .markdown-body ul { list-style: none; padding-left: 1.5em; margin-bottom: 1.5em; }
+      .markdown-body ul li { position: relative; margin-bottom: 0.5em; }
+      .markdown-body ul li::before {
+        content: '•';
+        position: absolute;
+        left: -1em;
+        color: #818cf8;
+        font-weight: bold;
+      }
+      .markdown-body ol { list-style-type: decimal; padding-left: 1.5em; margin-bottom: 1.5em; color: #94a3b8; }
+      .markdown-body ol li { margin-bottom: 0.5em; padding-left: 0.5em; }
+      .markdown-body ol li::marker { color: #818cf8; font-weight: 600; }
+
+      /* Blockquotes / Callouts */
+      .markdown-body blockquote {
+        position: relative;
+        margin: 2em 0;
+        padding: 1.5em 1.5em 1.5em 3em;
+        border-left: 4px solid #818cf8;
+        background: linear-gradient(90deg, rgba(129, 140, 248, 0.1) 0%, rgba(30, 41, 59, 0) 100%);
+        border-radius: 0 8px 8px 0;
+        color: #e2e8f0;
+      }
+      .markdown-body blockquote::before {
+        content: '❝';
+        position: absolute;
+        left: 0.5em;
+        top: 0.5em;
+        font-size: 2em;
+        color: #818cf8;
+        opacity: 0.3;
+        line-height: 1;
+      }
+      
+      /* Specific Strong/Bold Styling */
+      .markdown-body strong {
+        color: #fff;
+        font-weight: 700;
+      }
+      
+      /* Inline Code */
+      .markdown-body code {
+        background-color: rgba(56, 189, 248, 0.1);
+        color: #38bdf8;
+        padding: 0.2em 0.4em;
+        border-radius: 4px;
+        font-family: 'JetBrains Mono', monospace;
+        font-size: 0.9em;
+        border: 1px solid rgba(56, 189, 248, 0.2);
+      }
+
+      /* Active Recall Blur Effect (Study Mode) */
+      .study-mode strong {
+        background-color: #475569;
+        color: transparent;
+        text-shadow: none;
+        border-radius: 4px;
+        cursor: help;
+        transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+        padding: 0 6px;
+        box-shadow: 0 0 0 1px #334155;
+        user-select: none;
+      }
+      .study-mode strong:hover {
+        background-color: rgba(129, 140, 248, 0.2);
+        color: #818cf8;
+        box-shadow: 0 0 0 1px #818cf8;
+        user-select: auto;
+      }
+    </style>
+  <script type="importmap">
+{
+  "imports": {
+    "react-markdown": "https://esm.sh/react-markdown@^10.1.0",
+    "react-dom/": "https://esm.sh/react-dom@^19.2.4/",
+    "react/": "https://esm.sh/react@^19.2.4/",
+    "react": "https://esm.sh/react@^19.2.4",
+    "@google/genai": "https://esm.sh/@google/genai@^1.40.0",
+    "@supabase/supabase-js": "https://esm.sh/@supabase/supabase-js@^2.39.0",
+    "lucide-react": "https://esm.sh/lucide-react@^0.563.0",
+    "mermaid": "https://esm.sh/mermaid@^11.12.2",
+    "remark-gfm": "https://esm.sh/remark-gfm@^4.0.1"
+  }
+}
+</script>
+<link rel="stylesheet" href="/index.css">
+</head>
+  <body>
+    <div id="root"></div>
+  <script type="module" src="/index.tsx"></script>
+</body>
+</html>
