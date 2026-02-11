@@ -2,7 +2,10 @@
 // UTILITIES
 // ==========================================
 
-// Helper: Clean content for quotes inside callouts
+/**
+ * Helper: Membersihkan konten untuk dimasukkan ke dalam Callout/Blockquote.
+ * Menangani baris kosong agar tetap memiliki prefix '>'.
+ */
 const cleanAndQuoteContent = (content: string): string => {
   if (!content || content.trim().length === 0) return ">";
   return content
@@ -17,7 +20,8 @@ const cleanAndQuoteContent = (content: string): string => {
 // ==========================================
 
 /**
- * Mengubah tag custom <<<TAG_START>>> menjadi Obsidian Callouts
+ * 1. CONVERT TAGS TO OBSIDIAN CALLOUTS
+ * Mengubah tag custom <<<TAG_START>>> menjadi format Callout Obsidian.
  */
 export const convertTagsToObsidian = (text: string): string => {
   const tagMap: Record<string, { type: string; icon: string }> = {
@@ -31,7 +35,7 @@ export const convertTagsToObsidian = (text: string): string => {
   let processedText = text;
 
   for (const [tagName, config] of Object.entries(tagMap)) {
-    // Regex fleksibel: menangani newline atau spasi setelah title
+    // Regex menangkap title dan body, fleksibel terhadap newline
     const pattern = new RegExp(
       `<<<${tagName}_START>>>\\s*(.*?)(?:\\n|\\s)(?=[\\s\\S])([\\s\\S]*?)<<<${tagName}_END>>>`,
       'g'
@@ -48,74 +52,90 @@ export const convertTagsToObsidian = (text: string): string => {
 };
 
 /**
- * Memperbaiki sintaks Mermaid yang rusak, terutama panah dan label node
+ * 2. FIX MERMAID SYNTAX (THE CORE FIXER)
+ * Memperbaiki panah putus, kutip ganda bertumpuk, dan halusinasi.
  */
 export const fixMermaidSyntax = (markdownText: string): string => {
   // Regex untuk menangkap blok mermaid
   return markdownText.replace(/```mermaid([\s\S]*?)```/g, (match, rawContent) => {
     let lines = rawContent.trim().split('\n');
 
-    // 1. Cek tipe diagram (Default ke graph TD jika kosong/tidak jelas)
+    // A. Cek Tipe Diagram
+    // Jika tidak ada deklarasi tipe, default ke 'graph TD'
     const firstLine = lines[0]?.trim() || "";
     const isFlowchart = /^(graph|flowchart)/i.test(firstLine);
+    const isKnownDiagram = /^(graph|flowchart|sequenceDiagram|classDiagram|stateDiagram|erDiagram|mindmap|gantt|pie|journey|gitGraph)/i.test(firstLine);
 
-    if (
-      !lines.some((l) =>
-        /^(graph|flowchart|sequenceDiagram|classDiagram|stateDiagram|erDiagram|gantt|pie|mindmap|journey|gitGraph)/i.test(
-          l
-        )
-      )
-    ) {
+    if (!isKnownDiagram) {
       lines.unshift('graph TD');
     }
 
-    // !! PENTING: Jangan otak-atik sintaks jika BUKAN flowchart/graph.
-    // Sequence diagram, gantt, dll punya sintaks sangat berbeda dan rentan rusak.
-    if (!isFlowchart && lines.length > 0 && !/^(graph|flowchart)/i.test(lines[0])) {
-      return match;
-    }
+    // B. PENGAMANAN: Jika bukan flowchart/graph/stateDiagram, 
+    // jangan terlalu agresif memformat (takut merusak logic sequence/gantt)
+    // Kita hanya jalankan fix basic.
+    const aggressiveFix = /^(graph|flowchart|stateDiagram)/i.test(lines[0]);
 
     const fixedLines: string[] = [];
 
     for (let line of lines) {
       line = line.trim();
+      
       // Skip baris kosong atau komentar
       if (!line || line.startsWith('%%')) {
         fixedLines.push(line);
         continue;
       }
 
-      // 1. Hapus bullet points hallucination (contoh: "1. A --> B")
-      line = line.replace(/^[\d\.\-\*\s]+(?=[a-zA-Z])/, '');
+      // 1. Hapus Bullet Points Halusinasi (Contoh: "1. A --> B")
+      // Hanya lakukan ini pada flowchart
+      if (aggressiveFix) {
+        line = line.replace(/^[\d\.\-\*\s]+(?=[a-zA-Z])/, '');
+      }
 
-      // 2. Fix Panah (CRITICAL UPDATE: Menangani panah putus "- ->")
+      // 2. FIX PANAH (BROKEN ARROWS)
+      // Ini memperbaiki kasus user: "- ->" menjadi "-->"
       line = line
-        // Tahap A: Sambungkan panah yang terputus oleh spasi
-        .replace(/-\s+->/g, '-->')      // "- ->"  menjadi "-->"
-        .replace(/=\s+=>/g, '==>')      // "= =>"  menjadi "==>"
-        .replace(/-\s+\.->/g, '-.->')   // "- .->" menjadi "-.->"
+        .replace(/-\s+->/g, '-->')      // Fix: "- ->"
+        .replace(/=\s+=>/g, '==>')      // Fix: "= =>"
+        .replace(/-\s+\.->/g, '-.->')   // Fix: "- .->"
         
-        // Tahap B: Standarisasi spasi di sekitar panah (agar rapi)
+        // Standarisasi spasi agar rapi
         .replace(/\s*-->\s*/g, ' --> ')
         .replace(/\s*->\s*/g, ' -> ')
         .replace(/\s*-\.->\s*/g, ' -.-> ')
         .replace(/\s*==>\s*/g, ' ==> ');
 
-      // 3. Sanitasi Node Label (Aman: Bungkus isi dengan quotes)
-      // Mengubah A[Isi Teks] menjadi A["Isi Teks"] agar karakter aneh tidak merusak diagram
-      line = line.replace(
-        /(\b\w+)\s*([\[\(\{])(.+?)([\]\}\)])/g,
-        (m, id, open, content, close) => {
-          // Escape quotes di dalam label
-          let safeContent = content.replace(/"/g, "'");
-          return `${id}${open}"${safeContent.trim()}"${close}`;
-        }
-      );
+      // 3. SANITASI NODE LABEL (FIX DOUBLE QUOTES)
+      // Mengubah: A["Filtrat("Pre-Urin")"] menjadi A["Filtrat('Pre-Urin')"]
+      if (aggressiveFix) {
+        // Regex menangkap: ID + Kurung + Isi + KurungTutup
+        line = line.replace(/([a-zA-Z0-9_]+)\s*([\[\(\{\>]+)(.*?)([\]\)\}\>]+)/g, (m, id, open, rawContent, close) => {
+            
+            let content = rawContent.trim();
+            
+            // a. Kupas kutip luar jika ada (e.g. "Isi")
+            if (content.startsWith('"') && content.endsWith('"')) {
+                content = content.slice(1, -1);
+            }
 
-      // 4. Validasi Sederhana (Hapus baris text biasa yang bukan sintaks graph)
-      const validChars = /(-->|->|==>|-\.->|subgraph|end|classDef|style|click|\[|\(|\{)/;
-      if (!validChars.test(line) && line.split(' ').length > 3) {
-        line = `%% Possible hallucination ignored: ${line}`;
+            // b. Ganti semua kutip ganda (") di dalam menjadi kutip satu (')
+            // Ini mencegah error syntax mermaid
+            content = content.replace(/"/g, "'");
+
+            // c. Bungkus ulang dengan aman
+            return `${id}${open}"${content}"${close}`;
+        });
+      }
+
+      // 4. Validasi Sederhana
+      // Jika baris panjang tapi tidak ada simbol mermaid, mungkin itu teks nyasar.
+      // Kecuali itu adalah judul "subgraph" atau "end" atau style class
+      if (aggressiveFix) {
+          const validKeywords = /(-->|->|==>|-\.->|subgraph|end|classDef|style|click|class|direction|:::)/;
+          // Jika tidak ada keyword mermaid DAN tidak ada kurung node, anggap sampah/komentar
+          if (!validKeywords.test(line) && !/[\[\(\{\>].*[\]\)\}\>]/.test(line) && line.split(' ').length > 3) {
+             line = `%% Ignored text: ${line}`;
+          }
       }
 
       fixedLines.push(line);
@@ -126,16 +146,17 @@ export const fixMermaidSyntax = (markdownText: string): string => {
 };
 
 /**
- * Main Entry Point: Proses keseluruhan text
+ * 3. MAIN PROCESSOR
+ * Fungsi utama yang dipanggil untuk memproses teks mentah.
  */
 export const processGeneratedNote = (rawText: string): string => {
-  // 1. Hapus chatter AI "Here is the diagram" (hanya jika di baris sendiri)
+  // 1. Hapus chatter AI "Here is the diagram"
   let processed = rawText.replace(
-    /^\s*(Here is|This is) the (mermaid )?diagram(:)?\s*$/gim,
+    /^\s*(Here is|This is|I have generated) the (mermaid )?diagram(:)?\s*$/gim,
     ''
   );
 
-  // 2. Fix Mermaid Syntax (Termasuk panah putus)
+  // 2. Fix Mermaid Syntax (Panah & Kutip)
   processed = fixMermaidSyntax(processed);
 
   // 3. Convert Custom Tags ke Obsidian Callouts
