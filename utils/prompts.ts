@@ -32,6 +32,7 @@ SYSTEM PROTOCOL: HIGH-DENSITY VISUAL NOTE GENERATION
     - Label nodes simply: \`A[Label]\`.
     - DO NOT use brackets inside the label text.
     - Keep chart structure simple but data-rich.
+    - STRICT MERMAID SYNTAX RULE: Never put spaces inside arrow syntax. You must use --> or ==>, NEVER use - -> or = =>. Arrows must be solid characters.
     
 6. **LANGUAGE:**
     - OUTPUT MUST BE IN **INDONESIAN** (Bahasa Indonesia), unless technical terms require English.
