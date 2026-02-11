@@ -1,5 +1,5 @@
 {
-  "name": "neuronote-ai",
+  "name": "neuronote",
   "private": true,
   "version": "0.0.0",
   "type": "module",
@@ -16,7 +16,8 @@
     "@supabase/supabase-js": "^2.39.0",
     "lucide-react": "^0.563.0",
     "mermaid": "^11.12.2",
-    "remark-gfm": "^4.0.1"
+    "remark-gfm": "^4.0.1",
+    "groq-sdk": "0.7.0"
   },
   "devDependencies": {
     "@types/node": "^22.14.0",

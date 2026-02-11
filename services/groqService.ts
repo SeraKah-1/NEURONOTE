@@ -1,6 +1,30 @@
+
+import Groq from 'groq-sdk';
 import { GenerationConfig } from '../types';
 import { getStrictPrompt } from '../utils/prompts';
 import { processGeneratedNote } from '../utils/formatter';
+
+// Helper to get SDK instance
+const getGroqClient = (apiKey: string) => {
+  return new Groq({ 
+    apiKey: apiKey,
+    dangerouslyAllowBrowser: true // Required for client-side use
+  });
+};
+
+export const getAvailableGroqModels = async (config: GenerationConfig) => {
+  const apiKey = config.groqApiKey || process.env.GROQ_API_KEY;
+  if (!apiKey) return [];
+
+  try {
+    const groq = getGroqClient(apiKey);
+    const list = await groq.models.list();
+    return list.data;
+  } catch (error) {
+    console.error("Failed to fetch Groq models:", error);
+    return [];
+  }
+};
 
 export const generateNoteContentGroq = async (
   config: GenerationConfig,
@@ -15,8 +39,9 @@ export const generateNoteContentGroq = async (
     throw new Error("Groq API Key is missing. Please enter it in Settings.");
   }
 
-  onProgress("Checking configurations...");
+  onProgress("Initializing Groq SDK...");
   const modelName = config.model;
+  const groq = getGroqClient(apiKey);
 
   onProgress(`Connecting to Groq Cloud (${modelName})...`);
 
@@ -24,8 +49,6 @@ export const generateNoteContentGroq = async (
     const textPrompt = getStrictPrompt(topic, structure, config.mode);
     
     // Construct the messages payload with strict system instructions
-    // We explicitly tell it to ignore token limits in its reasoning (not technical limits)
-    // to prevent it from self-censoring or summarizing.
     const messages = [
       {
         role: "system",
@@ -45,31 +68,17 @@ export const generateNoteContentGroq = async (
 
     onProgress("Synthesizing content (Groq LPU Engine - Max Output)...");
 
-    const response = await fetch("https://api.groq.com/openai/v1/chat/completions", {
-      method: "POST",
-      headers: {
-        "Authorization": `Bearer ${apiKey}`,
-        "Content-Type": "application/json"
-      },
-      body: JSON.stringify({
-        messages: messages,
-        model: modelName,
-        temperature: config.temperature,
-        // Set to 32k (High limit) to allow "Overclocked" length. 
-        // If the specific model (e.g. 8b) supports less, Groq will cap it automatically without erroring usually.
-        max_completion_tokens: 32768, 
-        top_p: 1,
-        stream: false
-      })
+    const completion = await groq.chat.completions.create({
+      messages: messages as any,
+      model: modelName,
+      temperature: config.temperature,
+      // Groq currently caps output tokens at 8192 for most models
+      max_completion_tokens: 8192, 
+      top_p: 1,
+      stream: false
     });
 
-    if (!response.ok) {
-      const errorData = await response.json();
-      throw new Error(errorData.error?.message || `Groq API Error: ${response.statusText}`);
-    }
-
-    const data = await response.json();
-    const rawText = data.choices[0]?.message?.content;
+    const rawText = completion.choices[0]?.message?.content;
 
     if (!rawText) {
       throw new Error("Received empty response from Groq AI.");
@@ -81,9 +90,13 @@ export const generateNoteContentGroq = async (
     return finalContent;
 
   } catch (error: any) {
-    console.error("Groq API Error:", error);
+    console.error("Groq SDK Error:", error);
     if (error.message?.includes("429")) {
       throw new Error("Groq Rate Limit Exceeded (429). Please wait or check your plan.");
+    }
+    // Handle error where model doesn't exist (e.g. slight slug mismatch)
+    if (error.message?.includes("model")) {
+        throw new Error(`Model Error: ${error.message}`);
     }
     throw error;
   }

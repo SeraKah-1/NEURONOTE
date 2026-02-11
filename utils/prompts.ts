@@ -1,34 +1,40 @@
+
 import { NoteMode } from '../types';
 
 /* -------------------------------------------------------------------------- */
 /*                        CORE FORMATTING RULES (STRICT)                      */
 /* -------------------------------------------------------------------------- */
 const CORE_FORMATTING_RULES = `
-SYSTEM PROTOCOL: ACADEMIC MEDICAL OUTPUT
+SYSTEM PROTOCOL: HIGH-DENSITY VISUAL NOTE GENERATION
 
-1.  **VISUALIZATION (Mermaid):**
-    - Use \`\`\`mermaid\`\`\` blocks for processes/pathways.
-    - Logic: Use rectangular nodes for states, arrows for transitions.
-    - KEEP LABELS SHORT inside diagram nodes. Use long explanations in text.
+1.  **NO FILLER / DIRECT DATA ONLY:**
+    - Do NOT write introductions, conclusions, or polite conversational text.
+    - Start directly with the Headers.
+    - Max paragraph length: 3 lines. Use bullet points for everything else.
 
-2.  **INTERACTIVE COMPONENTS (Parsed by Frontend):**
-    - **DEEP DIVE (Accordions):** 
-      Use \`<<<DEEP_START>>>\` [Concept Title] ...content... \`<<<DEEP_END>>>\`
-    - **CLINICAL PEARLS (Callouts):** 
-      Use \`<<<CLINIC_START>>>\` [Title] ...content... \`<<<CLINIC_END>>>\`
-    - **CRITICAL ALERTS:** 
-      Use \`<<<ALERT_START>>>\` [Warning Type] ...content... \`<<<ALERT_END>>>\`
+2.  **MANDATORY VISUALIZATION (THE 1:1 RULE):**
+    - **EVERY** major Section (H2) and Concept **MUST** be immediately followed by a \`\`\`mermaid\`\`\` diagram.
+    - **Process/Pathway?** Use \`flowchart TD\`.
+    - **Classification/Hierarchy?** Use \`mindmap\`.
+    - **Interaction/Cycle?** Use \`sequenceDiagram\` or \`stateDiagram\`.
+    - **Rule:** If you explain a mechanism in text, you MUST draw it in Mermaid immediately after.
 
-3.  **ANTI-BREVITY PROTOCOL (CRITICAL):**
-    - **DO NOT SUMMARIZE.** Never use phrases like "In brief", "Summary", "To conclude".
-    - **BE EXHAUSTIVE.** If a section has 10 sub-points, list all 10. Do not group them arbitrarily.
-    - **MAXIMUM DETAIL.** Expand every mechanism to its molecular/physiologic root.
-    - **NO SKIPPING.** Do not skip steps in pathways or treatment algorithms.
+3.  **CONTRASTIVE ANALYSIS (TABLES):**
+    - If comparing 2 or more items, use a Markdown Table.
+    - Headers must be specific (e.g., Mechanism, Onset, Side Effects).
 
-4.  **MARKDOWN STANDARD:**
-    - Use **Bold** for terminology.
-    - Use Tables for differential diagnoses and drug classifications.
-    - Tone: Clinical, Objective, Concise but Comprehensive.
+4.  **INTERACTIVE BLOCKS:**
+    - **Deep Dive:** \`<<<DEEP_START>>>\` [Title] ...content... \`<<<DEEP_END>>>\`
+    - **Clinical Pearl:** \`<<<CLINIC_START>>>\` [Title] ...content... \`<<<CLINIC_END>>>\`
+    - **Warning:** \`<<<ALERT_START>>>\` [Title] ...content... \`<<<ALERT_END>>>\`
+
+5.  **MERMAID SYNTAX SAFETY:**
+    - Label nodes simply: \`A[Label]\`.
+    - DO NOT use brackets inside the label text.
+    - Keep chart structure simple but data-rich.
+    
+6. **LANGUAGE:**
+    - OUTPUT MUST BE IN **INDONESIAN** (Bahasa Indonesia), unless technical terms require English.
 `;
 
 /* -------------------------------------------------------------------------- */
@@ -36,53 +42,42 @@ SYSTEM PROTOCOL: ACADEMIC MEDICAL OUTPUT
 /* -------------------------------------------------------------------------- */
 
 const MODE_GENERAL = `
-MODE: **COMPREHENSIVE CLINICAL REVIEW**
-OBJECTIVE: Synthesize a complete medical reference note.
+MODE: **CLINICAL MASTERFILE**
+OBJECTIVE: Comprehensive reference.
 INSTRUCTIONS:
-- Adhere strictly to the provided syllabus structure.
-- Balance basic science (pathology) with clinical application (management).
-- Language must be formal medical Indonesian (EYD) mixed with standard English medical terminology where appropriate.
-- Avoid first-person or second-person pronouns ("I", "You", "Kita"). Use passive voice or impersonal structures.
+- Structure: Pathophysiology -> Clinical -> Management.
+- **Mandatory Flowcharts:**
+  1. Pathophysiology Mechanism.
+  2. Diagnostic Algorithm (Step-by-step).
+  3. Treatment Algorithm (Lines of therapy).
 `;
 
 const MODE_CHEAT_CODES = `
-MODE: **HIGH-YIELD & MNEMONICS**
-OBJECTIVE: Optimize information for rapid retention and recall.
+MODE: **EXAM CRAM SHEET**
+OBJECTIVE: Rapid recall tables and facts.
 INSTRUCTIONS:
-- Format content primarily as **Bullet Points** and **Comparison Tables**.
-- For every list of symptoms or criteria, provide a **Mnemonic**.
-- Highlight "Buzzwords" often found in examination vignettes using **Bold**.
-- Use \`<<<ALERT_START>>>\` for "Red Flags" or contraindications.
+- 90% Bullet points, 10% Tables.
+- **Mnemonics:** Required for every section.
+- **Visuals:** Use simple Flowcharts for decision trees only.
 `;
 
 const MODE_FIRST_PRINCIPLES = `
-MODE: **MECHANISTIC PATHOPHYSIOLOGY**
-OBJECTIVE: Deconstruct clinical presentation via molecular/physiologic causality.
+MODE: **MECHANISTIC DECONSTRUCTION**
+OBJECTIVE: Causal explanations.
 INSTRUCTIONS:
-- Do not state facts without causal links. (e.g., Instead of "Causes edema", state "Increased hydrostatic pressure leads to fluid transudation...").
-- Extensive use of **Mermaid Flowcharts** to map pathogenesis.
-- Deep dive into receptors, enzymes, and hemodynamics inside \`<<<DEEP_START>>>\` blocks.
-- Connect pathology back to normal physiology.
+- **Diagram Heavy:** This mode requires the most Mermaid diagrams.
+- Map every symptom back to its molecular origin using Flowcharts.
+- Example: \`Insult -> Cell Injury -> Mediator Release -> Clinical Sign\`.
+- Explain "WHY" for everything.
 `;
 
-const MODE_FEYNMAN = `
-MODE: **ANALOGICAL EXPLANATION**
-OBJECTIVE: Clarify complex concepts using structural analogies.
+const MODE_CUSTOM = `
+MODE: **USER DEFINED / ADAPTIVE**
+OBJECTIVE: Follow the user's provided structure skeleton exactly.
 INSTRUCTIONS:
-- **Do not use childish language.** Use "Structural Analogies" (e.g., comparing hemodynamic resistance to electrical resistance).
-- Simplify sentence structure but maintain professional terminology in parentheses.
-- Focus on the *intuition* behind the mechanism rather than rote memorization.
-- Explain concepts clearly as if writing for a general practitioner, not a specialist.
-`;
-
-const MODE_SOCRATIC = `
-MODE: **INQUIRY-BASED LEARNING**
-OBJECTIVE: Structure content as a sequence of clinical problems and solutions.
-INSTRUCTIONS:
-- Instead of standard headers, frame sections as Clinical Questions (e.g., "What is the underlying mechanism of...").
-- Follow questions immediately with the objective answer.
-- Connect organ systems (Integrative Physiology).
-- Use \`<<<DEEP_START>>>\` to provide detailed reasoning for the answers.
+- Expand on the headers provided by the user.
+- Use the visual protocols (Mermaid) for any complex concept mentioned in their structure.
+- If the structure is empty, default to a high-yield summary.
 `;
 
 /* -------------------------------------------------------------------------- */
@@ -95,8 +90,7 @@ export const getSystemModeInstruction = (mode: NoteMode) => {
   switch (mode) {
     case NoteMode.CHEAT_CODES: selectedModeInstruction = MODE_CHEAT_CODES; break;
     case NoteMode.FIRST_PRINCIPLES: selectedModeInstruction = MODE_FIRST_PRINCIPLES; break;
-    case NoteMode.FEYNMAN: selectedModeInstruction = MODE_FEYNMAN; break;
-    case NoteMode.SOCRATIC: selectedModeInstruction = MODE_SOCRATIC; break;
+    case NoteMode.CUSTOM: selectedModeInstruction = MODE_CUSTOM; break;
     default: selectedModeInstruction = MODE_GENERAL;
   }
 
@@ -114,16 +108,18 @@ export const getStrictPrompt = (topic: string, structure: string, mode: NoteMode
 ${systemInstruction}
 
 TARGET TOPIC: ${topic}
-SOURCE MATERIAL CONTEXT: Use attached files (if any) as primary context. Augment with Gold Standard Medical Knowledge (Harrison's, Robbins, Guyton).
+CONTEXT: Medical Education & Professional Clinical Practice.
 
 ---
 
-### REQUIRED OUTPUT STRUCTURE:
-Must follow this outline exactly, but populate it according to the MODE instructions above:
+### REQUIRED SKELETON:
 ${structure}
 
 ---
 
-**EXECUTE GENERATION. ENSURE STRICT ADHERENCE TO TAG FORMAT (\`<<<\`...\`>>>\`). NO CONVERSATIONAL TEXT.**
+**EXECUTE GENERATION.** 
+- STRICT ADHERENCE to Mermaid diagram requirements for every concept.
+- NO conversational filler.
+- STRICT Markdown output.
 `;
 };

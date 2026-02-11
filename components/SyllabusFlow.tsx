@@ -26,7 +26,6 @@ const SyllabusFlow: React.FC<SyllabusFlowProps> = ({ config, onSelectTopic }) =>
   const [savedQueues, setSavedQueues] = useState<SavedQueue[]>([]);
   const [storageService] = useState(StorageService.getInstance());
 
-  // Load active queue from local storage on mount
   useEffect(() => {
     const savedActive = localStorage.getItem('neuro_syllabus_queue');
     const savedMeta = localStorage.getItem('neuro_syllabus_meta');
@@ -43,7 +42,6 @@ const SyllabusFlow: React.FC<SyllabusFlowProps> = ({ config, onSelectTopic }) =>
     loadLibrary();
   }, []);
 
-  // Save active queue to local persistent state (auto-save current work)
   useEffect(() => {
     localStorage.setItem('neuro_syllabus_queue', JSON.stringify(queue));
     localStorage.setItem('neuro_syllabus_meta', JSON.stringify({ id: queueId, name: queueName }));
@@ -95,7 +93,7 @@ const SyllabusFlow: React.FC<SyllabusFlowProps> = ({ config, onSelectTopic }) =>
     };
 
     await storageService.saveQueue(newQueue);
-    setQueueId(idToSave); // Ensure we are working on the saved ID now
+    setQueueId(idToSave);
     await loadLibrary();
     alert("Curriculum saved to Library!");
   };
@@ -106,7 +104,7 @@ const SyllabusFlow: React.FC<SyllabusFlowProps> = ({ config, onSelectTopic }) =>
     setQueue(saved.items);
     setQueueName(saved.name);
     setQueueId(saved.id);
-    setActiveTab('upload'); // Switch back to main view (or logic to show queue)
+    setActiveTab('upload');
   };
 
   const handleDeleteFromLibrary = async (id: string, e: React.MouseEvent) => {
@@ -305,7 +303,7 @@ const SyllabusFlow: React.FC<SyllabusFlowProps> = ({ config, onSelectTopic }) =>
                   {isParsing ? (
                     <>
                       <RefreshCw className="animate-spin" size={20} />
-                      <span>Analyzing Syllabus...</span>
+                      <span>Parsing...</span>
                     </>
                   ) : (
                     <>
@@ -338,7 +336,7 @@ const SyllabusFlow: React.FC<SyllabusFlowProps> = ({ config, onSelectTopic }) =>
                       onClick={() => !isDone && handleStartTopic(item.id, item.topic)}
                       className={`relative p-3 rounded-lg border transition-all duration-300 group ${
                         isActive 
-                          ? 'bg-neuro-primary/10 border-neuro-primary shadow-[0_0_15px_rgba(129,140,248,0.1)]' 
+                          ? 'bg-neuro-primary/10 border-neuro-primary shadow-sm' 
                           : isDone
                             ? 'bg-gray-900/30 border-gray-800 opacity-60'
                             : 'bg-neuro-surface/40 border-gray-800 hover:bg-neuro-surface hover:border-gray-600 cursor-pointer'
@@ -374,7 +372,7 @@ const SyllabusFlow: React.FC<SyllabusFlowProps> = ({ config, onSelectTopic }) =>
                            )}
                            {isActive && (
                              <button className="flex items-center space-x-1 bg-neuro-primary hover:bg-neuro-primaryHover text-white text-[10px] font-bold px-2 py-1 rounded shadow-lg">
-                               <span>GO</span>
+                               <span>START</span>
                                <ArrowRight size={10} />
                              </button>
                            )}

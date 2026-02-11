@@ -1,25 +1,81 @@
-import React, { useState, useEffect } from 'react';
-import { BrainCircuit, Settings2, Sparkles, BookOpen, Layers, Zap, AlertCircle, X, Key, GraduationCap, Microscope, Puzzle, MessageCircleQuestion, History, Clock, Trash2, FileText, Cpu, CloudLightning, Save, ShieldCheck, Database, HardDrive, Cloud, ChevronRight, Layout, Activity, FlaskConical, ListChecks, Edit2 } from 'lucide-react';
-import { AppModel, AppState, NoteData, GenerationConfig, DEFAULT_STRUCTURE, MODE_STRUCTURES, UploadedFile, NoteMode, HistoryItem, AIProvider, StorageType, AppView } from './types';
-import { generateNoteContent } from './services/geminiService';
-import { generateNoteContentGroq } from './services/groqService';
+
+import React, { useState, useEffect, Suspense } from 'react';
+import { BrainCircuit, Settings2, Sparkles, BookOpen, Layers, Zap, AlertCircle, X, Key, GraduationCap, Microscope, Puzzle, Database, HardDrive, Cloud, Layout, Activity, FlaskConical, ListChecks, Bell, HelpCircle, Copy, Check, ShieldCheck, Cpu, Unlock, Download, RefreshCw, User, Lock, Server, PenTool, Wand2, ChevronRight, FileText, FolderOpen, Trash2, CheckCircle2, Circle, Command, Bot, Maximize2, Home } from 'lucide-react';
+import { AppModel, AppState, NoteData, GenerationConfig, MODE_STRUCTURES, NoteMode, HistoryItem, AIProvider, StorageType, AppView, EncryptedPayload } from './types';
+import { generateNoteContent, generateDetailedStructure } from './services/geminiService';
+import { generateNoteContentGroq, getAvailableGroqModels } from './services/groqService';
 import { StorageService } from './services/storageService';
-import OutputDisplay from './components/OutputDisplay';
+import { NotificationService } from './services/notificationService';
 import FileUploader from './components/FileUploader';
 import SyllabusFlow from './components/SyllabusFlow';
+import LoginGate from './components/LoginGate';
+import FileSystem from './components/FileSystem'; 
+import NeuralVault from './components/NeuralVault';
+
+// LAZY LOAD OPTIMIZATION:
+// These components are heavy. We only load them when the specific View is active.
+// This keeps the "Workspace" extremely light when typing/generating.
+const GraphView = React.lazy(() => import('./components/GraphView'));
+const OutputDisplay = React.lazy(() => import('./components/OutputDisplay'));
+const AdminPanel = React.lazy(() => import('./components/AdminPanel'));
+
+// Updated SQL to handle schema migration including TAGS
+const SUPABASE_SETUP_SQL = `
+-- RUN THIS IN SUPABASE SQL EDITOR --
+
+-- 1. Create Table (with tags support)
+create table if not exists public.neuro_notes (
+  id text primary key,
+  timestamp bigint,
+  topic text,
+  mode text,
+  content text,
+  provider text,
+  tags text[] -- Array of strings for tagging
+);
+
+-- 2. Security (Allow All)
+alter table public.neuro_notes enable row level security;
+drop policy if exists "God Mode" on public.neuro_notes;
+create policy "God Mode" on public.neuro_notes for all using (true) with check (true);
+
+-- 3. Enable Realtime
+alter publication supabase_realtime add table public.neuro_notes;
+`.trim();
+
+// --- MODEL DEFINITIONS ---
+const GEMINI_MODELS = [
+  { value: AppModel.GEMINI_3_PRO, label: 'Gemini 3.0 Pro (Thinking)', badge: 'Reasoning' },
+  { value: AppModel.GEMINI_3_FLASH, label: 'Gemini 3.0 Flash', badge: 'Fast' },
+  { value: AppModel.GEMINI_2_5_PRO, label: 'Gemini 2.5 Pro', badge: 'Stable' },
+  { value: AppModel.GEMINI_2_5_FLASH, label: 'Gemini 2.5 Flash', badge: 'Production' },
+  { value: AppModel.GEMINI_1_5_PRO, label: 'Gemini 1.5 Pro (Legacy)', badge: 'Old' },
+];
+
+// Initial Groq Models (Will be augmented/verified by API)
+const INITIAL_GROQ_MODELS = [
+  { value: AppModel.GROQ_LLAMA_4_MAVERICK_17B, label: 'Llama 4 Maverick 17B', badge: 'New' },
+  { value: AppModel.GROQ_LLAMA_3_3_70B, label: 'Llama 3.3 70B', badge: 'Versatile' },
+  { value: AppModel.GROQ_MIXTRAL_8X7B, label: 'Mixtral 8x7B', badge: 'Logic' },
+  { value: AppModel.GROQ_GEMMA2_9B, label: 'Gemma 2 9B', badge: 'Google' },
+  { value: AppModel.GROQ_LLAMA_3_1_8B, label: 'Llama 3.1 8B', badge: 'Instant' },
+];
 
 const App: React.FC = () => {
+  // Auth State
+  const [isAuthenticated, setIsAuthenticated] = useState(false);
+  
   // State
   const [config, setConfig] = useState<GenerationConfig>({
     provider: AIProvider.GEMINI,
-    model: AppModel.GEMINI_2_5_FLASH, 
+    model: AppModel.GEMINI_3_FLASH, 
     temperature: 0.4,
-    apiKey: localStorage.getItem('neuro_api_key') || '',     
-    groqApiKey: localStorage.getItem('neuro_groq_key') || '',
+    apiKey: '', 
+    groqApiKey: '', 
     mode: NoteMode.GENERAL,
-    storageType: (localStorage.getItem('neuro_storage_type') as StorageType) || StorageType.LOCAL,
-    supabaseUrl: localStorage.getItem('neuro_sb_url') || '',
-    supabaseKey: localStorage.getItem('neuro_sb_key') || ''
+    storageType: StorageType.LOCAL,
+    supabaseUrl: '',
+    supabaseKey: ''
   });
 
   const [noteData, setNoteData] = useState<NoteData>({
@@ -33,122 +89,115 @@ const App: React.FC = () => {
     generatedContent: null,
     error: null,
     progressStep: '',
-    currentView: AppView.WORKSPACE
+    currentView: AppView.WORKSPACE,
+    activeNoteId: null
   });
 
-  const [history, setHistory] = useState<HistoryItem[]>([]);
-  const [settingsTab, setSettingsTab] = useState<'gemini' | 'groq' | 'storage'>('gemini');
+  const [isStructLoading, setIsStructLoading] = useState(false);
+  const [groqModels, setGroqModels] = useState(INITIAL_GROQ_MODELS);
+  const [settingsTab, setSettingsTab] = useState<'keys' | 'storage'>('keys'); // Reduced settings tabs
   const [storageService] = useState(StorageService.getInstance());
+  const [notificationService] = useState(NotificationService.getInstance());
+  const [sqlCopied, setSqlCopied] = useState(false);
+  const [showAdminModal, setShowAdminModal] = useState(false);
+
+  // --- AUTH HANDLER ---
+  const handleAuthUnlock = (payload: EncryptedPayload) => {
+    setConfig(prev => ({
+      ...prev,
+      apiKey: payload.geminiKey || prev.apiKey,
+      groqApiKey: payload.groqKey || prev.groqApiKey,
+      supabaseUrl: payload.supabaseUrl || prev.supabaseUrl,
+      supabaseKey: payload.supabaseKey || prev.supabaseKey,
+      storageType: (payload.supabaseUrl && payload.supabaseKey) ? StorageType.SUPABASE : StorageType.LOCAL
+    }));
+
+    if (payload.supabaseUrl && payload.supabaseKey) {
+      storageService.initSupabase(payload.supabaseUrl, payload.supabaseKey);
+    }
+    setIsAuthenticated(true);
+    notificationService.requestPermissionManual();
+  };
 
   // Init Storage
   useEffect(() => {
-    storageService.setStorageType(config.storageType);
     if (config.supabaseUrl && config.supabaseKey) {
       storageService.initSupabase(config.supabaseUrl, config.supabaseKey);
     }
-  }, [config.storageType, config.supabaseUrl, config.supabaseKey, storageService]);
+  }, [config.supabaseUrl, config.supabaseKey, storageService]);
 
-  // Load History Logic
-  const fetchHistory = async () => {
-    try {
-      setAppState(prev => ({ ...prev, isLoading: true, progressStep: 'Loading History...' }));
-      const notes = await storageService.getNotes();
-      setHistory(notes);
-      setAppState(prev => ({ ...prev, isLoading: false, progressStep: '' }));
-    } catch (e: any) {
-      console.error("History Load Error", e);
-      setAppState(prev => ({ ...prev, isLoading: false, error: e.message || "Failed to load history" }));
-    }
-  };
-
+  // Fetch Groq Models
   useEffect(() => {
-    if (appState.currentView === AppView.HISTORY) {
-      fetchHistory();
-    }
-  }, [appState.currentView, config.storageType]);
-
-  const saveToHistory = async (topic: string, content: string, mode: NoteMode) => {
-    const newItem: HistoryItem = {
-      id: Date.now().toString(),
-      timestamp: Date.now(),
-      topic,
-      mode,
-      content,
-      provider: config.provider
+    const fetchModels = async () => {
+      if (config.provider === AIProvider.GROQ && config.groqApiKey) {
+        const models = await getAvailableGroqModels(config);
+        if (models && models.length > 0) {
+          // Merge logic: Use dynamic list but keep our custom labels/badges if they exist
+          const merged = models.map((m: any) => {
+            const existing = INITIAL_GROQ_MODELS.find(im => im.value === m.id);
+            return existing || { 
+              value: m.id, 
+              label: m.id.split('/').pop(), 
+              badge: 'API' 
+            };
+          });
+          // Ensure we don't lose the hardcoded Llama 4 if API list is partial/cached differently
+          // But usually API is authoritative.
+          setGroqModels(merged);
+        }
+      }
     };
+    fetchModels();
+  }, [config.provider, config.groqApiKey]);
+
+  // --- MANUAL SAVE HANDLER ---
+  const handleManualSave = async (contentToSave: string) => {
+    if (!noteData.topic) return alert("Missing Topic");
     
-    if (config.storageType === StorageType.LOCAL) {
-      setHistory(prev => [newItem, ...prev]);
-    }
+    // Use active ID if editing, or create new unique ID
+    const noteId = appState.activeNoteId || Date.now().toString();
 
-    try {
-      await storageService.saveNote(newItem);
-      if (config.storageType === StorageType.SUPABASE) {
-         fetchHistory();
-      }
-    } catch (e) {
-      console.error("Failed to save note", e);
-    }
+    const newItem: HistoryItem = {
+      id: noteId,
+      timestamp: Date.now(),
+      topic: noteData.topic,
+      mode: config.mode,
+      content: contentToSave,
+      provider: config.provider,
+      parentId: null
+    };
+
+    // Commit to storage (Local first)
+    storageService.saveNoteLocal(newItem);
+    
+    // Update state to reflect it's now a saved note
+    setAppState(prev => ({ ...prev, activeNoteId: noteId }));
+    notificationService.send("Note Saved", `"${noteData.topic}" saved successfully.`, "save-complete");
   };
 
-  const deleteHistoryItem = async (id: string, e: React.MouseEvent) => {
-    e.stopPropagation();
-    if (confirm("Delete this note permanently?")) {
-      try {
-        await storageService.deleteNote(id);
-        setHistory(prev => prev.filter(h => h.id !== id));
-      } catch (err: any) {
-        alert(`Failed to delete: ${err.message}`);
-      }
+  const handleUpdateContent = (newContent: string) => {
+    // Only update memory, DO NOT AUTO SAVE to disk
+    setAppState(prev => ({ ...prev, generatedContent: newContent }));
+  };
+
+  const handleSaveApiKey = (rawValue: string, type: 'gemini' | 'groq' | 'sb_url' | 'sb_key') => {
+    const key = rawValue.trim(); 
+    if (type === 'gemini') setConfig(prev => ({ ...prev, apiKey: key }));
+    else if (type === 'groq') setConfig(prev => ({ ...prev, groqApiKey: key }));
+    else if (type === 'sb_url') setConfig(prev => ({ ...prev, supabaseUrl: key }));
+    else if (type === 'sb_key') setConfig(prev => ({ ...prev, supabaseKey: key }));
+  };
+
+  // Improved Provider Switch Logic
+  const handleProviderSwitch = (provider: AIProvider) => {
+    setConfig(prev => ({ ...prev, provider }));
+    
+    // Auto-switch to default best model for the provider
+    if (provider === AIProvider.GEMINI) {
+      setConfig(prev => ({ ...prev, model: AppModel.GEMINI_3_FLASH }));
+    } else {
+      setConfig(prev => ({ ...prev, model: AppModel.GROQ_LLAMA_3_3_70B }));
     }
-  };
-
-  const renameHistoryItem = async (id: string, currentTopic: string, e: React.MouseEvent) => {
-    e.stopPropagation();
-    const newTopic = prompt("Rename note:", currentTopic);
-    if (newTopic && newTopic.trim()) {
-      try {
-        await storageService.renameNote(id, newTopic.trim());
-        setHistory(prev => prev.map(h => h.id === id ? { ...h, topic: newTopic.trim() } : h));
-      } catch (err: any) {
-        alert(`Failed to rename: ${err.message}`);
-      }
-    }
-  };
-
-  const loadFromHistory = (item: HistoryItem) => {
-    setNoteData(prev => ({ ...prev, topic: item.topic }));
-    setConfig(prev => ({ 
-      ...prev, 
-      mode: item.mode,
-      provider: item.provider || AIProvider.GEMINI 
-    }));
-    setAppState(prev => ({ 
-      ...prev, 
-      generatedContent: item.content, 
-      currentView: AppView.WORKSPACE
-    }));
-  };
-
-  const handleSaveApiKey = (key: string, type: 'gemini' | 'groq' | 'sb_url' | 'sb_key') => {
-    if (type === 'gemini') {
-      localStorage.setItem('neuro_api_key', key);
-      setConfig(prev => ({ ...prev, apiKey: key }));
-    } else if (type === 'groq') {
-      localStorage.setItem('neuro_groq_key', key);
-      setConfig(prev => ({ ...prev, groqApiKey: key }));
-    } else if (type === 'sb_url') {
-      localStorage.setItem('neuro_sb_url', key);
-      setConfig(prev => ({ ...prev, supabaseUrl: key }));
-    } else if (type === 'sb_key') {
-      localStorage.setItem('neuro_sb_key', key);
-      setConfig(prev => ({ ...prev, supabaseKey: key }));
-    }
-  };
-
-  const handleStorageSwitch = (type: StorageType) => {
-    localStorage.setItem('neuro_storage_type', type);
-    setConfig(prev => ({ ...prev, storageType: type }));
   };
 
   const handleGenerate = async () => {
@@ -156,53 +205,54 @@ const App: React.FC = () => {
       setAppState(prev => ({ ...prev, error: "Topic and Structure are required." }));
       return;
     }
+    
+    // Key Check
+    if (config.provider === AIProvider.GROQ && !config.groqApiKey) {
+        setAppState(prev => ({...prev, error: "Groq API Key is missing. Check Settings."}));
+        return;
+    }
+    if (config.provider === AIProvider.GEMINI && !config.apiKey) {
+        setAppState(prev => ({...prev, error: "Gemini API Key is missing. Check Settings."}));
+        return;
+    }
 
-    setAppState(prev => ({
-      ...prev,
-      isLoading: true,
-      generatedContent: null,
-      error: null,
-      progressStep: 'Initializing...',
-    }));
-
+    // Reset to "New Note" state when generating fresh
+    setAppState(prev => ({ ...prev, isLoading: true, generatedContent: null, error: null, progressStep: 'Initializing...', activeNoteId: null }));
+    
     try {
       let content = '';
-
       if (config.provider === AIProvider.GEMINI) {
-        content = await generateNoteContent(
-          config,
-          noteData.topic,
-          noteData.structure,
-          noteData.files,
-          (step) => setAppState(prev => ({ ...prev, progressStep: step }))
-        );
+        content = await generateNoteContent(config, noteData.topic, noteData.structure, noteData.files, (step) => setAppState(prev => ({ ...prev, progressStep: step })));
       } else {
-        content = await generateNoteContentGroq(
-          config,
-          noteData.topic,
-          noteData.structure,
-          (step) => setAppState(prev => ({ ...prev, progressStep: step }))
-        );
+        content = await generateNoteContentGroq(config, noteData.topic, noteData.structure, (step) => setAppState(prev => ({ ...prev, progressStep: step })));
       }
-
-      await saveToHistory(noteData.topic, content, config.mode);
-
-      setAppState(prev => ({
-        ...prev,
-        isLoading: false,
-        generatedContent: content,
-        error: null,
-        progressStep: 'Complete',
-      }));
+      
+      // AUTO-SAVE REMOVED. Only update UI.
+      notificationService.send("Note Generation Complete", `"${noteData.topic}" is ready for review.`, "gen-complete");
+      setAppState(prev => ({ ...prev, isLoading: false, generatedContent: content, error: null, progressStep: 'Complete' }));
+      
     } catch (err: any) {
-      setAppState(prev => ({
-        ...prev,
-        isLoading: false,
-        generatedContent: null,
-        error: err.message || "An unexpected error occurred",
-        progressStep: '',
-      }));
+      setAppState(prev => ({ ...prev, isLoading: false, generatedContent: null, error: err.message || "An unexpected error occurred", progressStep: '', }));
     }
+  };
+
+  const handleAutoStructure = async () => {
+    if (!noteData.topic) return alert("Please enter a Topic first.");
+    setIsStructLoading(true);
+    try {
+        const struct = await generateDetailedStructure(config, noteData.topic);
+        setNoteData(prev => ({ ...prev, structure: struct }));
+    } catch (e: any) {
+        alert("Failed to auto-generate structure: " + e.message);
+    } finally {
+        setIsStructLoading(false);
+    }
+  };
+
+  const handleCopySQL = () => {
+    navigator.clipboard.writeText(SUPABASE_SETUP_SQL);
+    setSqlCopied(true);
+    setTimeout(() => setSqlCopied(false), 2000);
   };
 
   const handleSelectSyllabusTopic = (topic: string) => {
@@ -210,17 +260,33 @@ const App: React.FC = () => {
     setAppState(prev => ({ ...prev, currentView: AppView.WORKSPACE }));
   };
 
+  const handleSelectNoteFromFileSystem = (note: HistoryItem) => {
+     // If user selects a cloud-only note, we might want to prompt or just load it read-only initially?
+     // For now, loading into Workspace allows saving to local easily.
+     setAppState(prev => ({
+        ...prev,
+        currentView: AppView.WORKSPACE,
+        generatedContent: note.content,
+        activeNoteId: note.id 
+     }));
+     setNoteData(prev => ({...prev, topic: note.topic}));
+     setConfig(prev => ({...prev, mode: note.mode}));
+  };
+
+  const handleRetrieveFromCloud = (note: HistoryItem) => {
+      // For cloud retrieval, we save a local copy immediately for caching
+      storageService.saveNoteLocal({...note, parentId: null});
+      alert(`✅ Downloaded "${note.topic}" to Local Workspace.`);
+      setAppState(prev => ({ ...prev, currentView: AppView.WORKSPACE, activeNoteId: note.id }));
+  };
+
   const setView = (view: AppView) => {
     setAppState(prev => ({ ...prev, currentView: view }));
   };
 
-  // Handler for Mode Switching that updates the structure
   const handleModeSwitch = (mode: NoteMode) => {
     setConfig(prev => ({ ...prev, mode }));
-    // Automatically update structure to the mode default, unless user is in syllabus view
-    if (appState.currentView === AppView.SYLLABUS) {
-      setView(AppView.WORKSPACE);
-    }
+    if (appState.currentView === AppView.SYLLABUS) setView(AppView.WORKSPACE);
     setNoteData(prev => ({ ...prev, structure: MODE_STRUCTURES[mode] }));
   };
 
@@ -228,290 +294,127 @@ const App: React.FC = () => {
     switch (mode) {
       case NoteMode.CHEAT_CODES: return <Zap size={18} className="text-amber-400" />;
       case NoteMode.FIRST_PRINCIPLES: return <Microscope size={18} className="text-cyan-400" />;
-      case NoteMode.FEYNMAN: return <Puzzle size={18} className="text-pink-400" />;
-      case NoteMode.SOCRATIC: return <MessageCircleQuestion size={18} className="text-emerald-400" />;
+      case NoteMode.CUSTOM: return <PenTool size={18} className="text-pink-400" />;
       default: return <GraduationCap size={18} className="text-neuro-primary" />;
     }
   };
 
   const getModeLabel = (mode: NoteMode) => {
     switch (mode) {
-      case NoteMode.CHEAT_CODES: return "Cheat Codes";
+      case NoteMode.CHEAT_CODES: return "Cheat Sheet";
       case NoteMode.FIRST_PRINCIPLES: return "First Principles";
-      case NoteMode.FEYNMAN: return "Feynman Method";
-      case NoteMode.SOCRATIC: return "Socratic Method";
+      case NoteMode.CUSTOM: return "Custom / Free Style";
       default: return "Standard Clinical";
     }
   };
 
-  const getModeDescription = (mode: NoteMode) => {
-    switch (mode) {
-      case NoteMode.CHEAT_CODES: return "Exam Mode. Mnemonics, tables & rapid fire facts.";
-      case NoteMode.FIRST_PRINCIPLES: return "The 'Why'. Molecular mechanisms & causal chains.";
-      case NoteMode.FEYNMAN: return "ELI5. Analogies & simple concepts for hard topics.";
-      case NoteMode.SOCRATIC: return "Self-Test. Q&A loops to force active recall.";
-      default: return "The Gold Standard. Complete reference for daily practice.";
-    }
-  };
-
-  const switchProvider = (provider: AIProvider) => {
-    let defaultModel = AppModel.GEMINI_2_5_FLASH;
-    if (provider === AIProvider.GROQ) {
-      defaultModel = AppModel.GROQ_LLAMA_3_3_70B;
-    }
-    setConfig(prev => ({ ...prev, provider, model: defaultModel }));
-  };
-
-  const getApiKeyStatus = () => {
-    if (config.provider === AIProvider.GEMINI) return config.apiKey ? 'Ready' : 'Missing Key';
-    return config.groqApiKey ? 'Ready' : 'Missing Key';
-  };
+  if (!isAuthenticated) {
+    return <LoginGate onUnlock={handleAuthUnlock} />;
+  }
 
   return (
     <div className="min-h-screen bg-neuro-bg text-neuro-text flex flex-col md:flex-row font-sans overflow-hidden selection:bg-neuro-primary/30 selection:text-white">
       
       {/* --- SIDEBAR: CONTROL CENTER --- */}
-      <aside className="w-full md:w-[350px] glass-panel border-r-0 md:border-r border-b md:border-b-0 border-white/5 p-5 flex flex-col shrink-0 z-30 h-screen overflow-hidden shadow-2xl">
+      <aside className="w-full md:w-[280px] lg:w-[320px] glass-panel p-5 flex flex-col shrink-0 z-30 h-screen overflow-hidden shadow-2xl border-r border-white/5">
         
         {/* Header Logo */}
-        <div className="flex items-center space-x-3 mb-8 shrink-0 select-none cursor-pointer" onClick={() => setView(AppView.WORKSPACE)}>
-          <div className="w-10 h-10 bg-gradient-to-br from-neuro-primary to-purple-600 rounded-xl flex items-center justify-center shadow-lg shadow-neuro-primary/20">
+        <div className="flex items-center space-x-3 mb-8 shrink-0 select-none cursor-pointer group px-2" onClick={() => setView(AppView.WORKSPACE)}>
+          <div className="w-10 h-10 bg-gradient-to-br from-neuro-primary to-indigo-700 rounded-xl flex items-center justify-center shadow-lg shadow-indigo-500/20 group-hover:scale-105 transition-transform">
              <BrainCircuit className="text-white" size={22} />
           </div>
-          <div>
-            <h1 className="text-lg font-bold text-white tracking-tight leading-tight">NeuroNote</h1>
-            <div className="flex items-center space-x-2">
-               <span className="w-1.5 h-1.5 rounded-full bg-green-500 animate-pulse"></span>
-               <span className="text-[10px] font-medium text-neuro-textMuted uppercase tracking-wider">System Online</span>
-            </div>
+          <div className="flex flex-col">
+            <h1 className="text-lg font-bold text-white tracking-tight leading-none">NeuroNote</h1>
+            <span className="text-[10px] font-medium text-neuro-textMuted uppercase tracking-widest mt-1">PKM System</span>
           </div>
         </div>
 
-        {/* Sidebar View Switcher Content */}
+        {/* Sidebar Content */}
         {appState.currentView === AppView.SETTINGS ? (
-          /* SETTINGS VIEW */
-          <div className="flex-1 flex flex-col animate-fade-in overflow-hidden">
-            <div className="flex items-center space-x-2 mb-4 text-neuro-primary pb-2 border-b border-white/5">
-              <Settings2 size={16} />
-              <h3 className="font-semibold text-xs uppercase tracking-wider">Configuration</h3>
-            </div>
-            
-            <div className="flex bg-neuro-surface p-1 rounded-lg mb-4 shrink-0">
-               {['gemini', 'groq', 'storage'].map((tab) => (
-                 <button
-                    key={tab}
-                    onClick={() => setSettingsTab(tab as any)}
-                    className={`flex-1 py-1.5 text-[10px] font-bold uppercase tracking-wide rounded-md transition-all ${settingsTab === tab ? 'bg-neuro-surfaceHighlight text-white shadow-sm' : 'text-neuro-textMuted hover:text-white'}`}
-                 >
-                   {tab}
-                 </button>
-               ))}
-            </div>
-
-            <div className="flex-1 overflow-y-auto custom-scrollbar space-y-4 px-1">
-              {settingsTab === 'gemini' && (
-                <div className="space-y-2">
-                  <label className="text-xs text-neuro-textMuted font-medium">Gemini API Key</label>
-                  <div className="relative group">
-                    <input 
-                      type="password"
-                      value={config.apiKey}
-                      onChange={(e) => handleSaveApiKey(e.target.value, 'gemini')}
-                      className="w-full bg-neuro-bg/50 border border-white/10 text-white rounded-lg p-3 pl-3 pr-8 text-xs font-mono focus:border-neuro-primary focus:ring-1 focus:ring-neuro-primary outline-none transition-all"
-                      placeholder="AIzaSy..."
-                    />
-                    <div className="absolute right-3 top-3 text-neuro-textMuted group-focus-within:text-neuro-primary transition-colors">
-                      {config.apiKey ? <ShieldCheck size={14} className="text-green-400" /> : <Key size={14} />}
-                    </div>
-                  </div>
-                  <p className="text-[10px] text-neuro-textMuted">Get your key at <a href="https://aistudio.google.com" target="_blank" className="text-neuro-primary hover:underline">Google AI Studio</a></p>
-                </div>
-              )}
-              {settingsTab === 'groq' && (
-                <div className="space-y-2">
-                  <label className="text-xs text-neuro-textMuted font-medium">Groq API Key</label>
-                  <div className="relative group">
-                    <input 
-                      type="password"
-                      value={config.groqApiKey}
-                      onChange={(e) => handleSaveApiKey(e.target.value, 'groq')}
-                      className="w-full bg-neuro-bg/50 border border-white/10 text-white rounded-lg p-3 pl-3 pr-8 text-xs font-mono focus:border-orange-500 focus:ring-1 focus:ring-orange-500 outline-none transition-all"
-                      placeholder="gsk_..."
-                    />
-                     <div className="absolute right-3 top-3 text-neuro-textMuted group-focus-within:text-orange-500 transition-colors">
-                      {config.groqApiKey ? <ShieldCheck size={14} className="text-green-400" /> : <Key size={14} />}
-                    </div>
-                  </div>
-                </div>
-              )}
-              {settingsTab === 'storage' && (
-                <div className="space-y-4">
-                  <div className="grid grid-cols-2 gap-3">
-                     <button onClick={() => handleStorageSwitch(StorageType.LOCAL)} className={`p-4 rounded-xl border transition-all flex flex-col items-center justify-center space-y-2 ${config.storageType === StorageType.LOCAL ? 'bg-neuro-primary/10 border-neuro-primary text-neuro-primary' : 'bg-neuro-bg/30 border-white/5 text-neuro-textMuted hover:bg-neuro-bg/50'}`}>
-                        <HardDrive size={20} />
-                        <span className="text-xs font-bold">Local</span>
-                     </button>
-                     <button onClick={() => handleStorageSwitch(StorageType.SUPABASE)} className={`p-4 rounded-xl border transition-all flex flex-col items-center justify-center space-y-2 ${config.storageType === StorageType.SUPABASE ? 'bg-emerald-500/10 border-emerald-500 text-emerald-400' : 'bg-neuro-bg/30 border-white/5 text-neuro-textMuted hover:bg-neuro-bg/50'}`}>
-                        <Cloud size={20} />
-                        <span className="text-xs font-bold">Supabase</span>
-                     </button>
-                  </div>
-                  {config.storageType === StorageType.SUPABASE && (
-                    <div className="space-y-3 pt-2 animate-slide-up">
-                      <input type="text" value={config.supabaseUrl} onChange={(e) => handleSaveApiKey(e.target.value, 'sb_url')} placeholder="Project URL" className="w-full bg-neuro-bg/50 border border-white/10 rounded-lg p-2 text-xs text-white focus:border-emerald-500 outline-none" />
-                      <input type="password" value={config.supabaseKey} onChange={(e) => handleSaveApiKey(e.target.value, 'sb_key')} placeholder="Anon Key" className="w-full bg-neuro-bg/50 border border-white/10 rounded-lg p-2 text-xs text-white focus:border-emerald-500 outline-none" />
-                    </div>
-                  )}
-                </div>
-              )}
-            </div>
-            <button onClick={() => setView(AppView.WORKSPACE)} className="mt-4 w-full py-2.5 bg-neuro-surfaceHighlight hover:bg-neuro-surface text-white text-xs font-medium rounded-lg transition-colors">Back to Workspace</button>
-          </div>
-
-        ) : appState.currentView === AppView.HISTORY ? (
-          /* HISTORY VIEW */
-          <div className="flex-1 flex flex-col animate-fade-in overflow-hidden">
-             <div className="flex items-center justify-between mb-4 pb-2 border-b border-white/5 text-neuro-primary">
+           /* SETTINGS VIEW (Simplified - Just Keys & Storage) */
+           <div className="flex-1 flex flex-col animate-fade-in overflow-hidden">
+             <div className="flex items-center justify-between mb-6 pb-2 border-b border-white/5 text-neuro-primary px-1">
                <div className="flex items-center space-x-2">
-                 <History size={16} />
-                 <h3 className="font-semibold text-xs uppercase tracking-wider">Saved Notes</h3>
+                 <Settings2 size={16} /> <h3 className="font-bold text-xs uppercase tracking-wider">Configuration</h3>
                </div>
-               <span className="text-[10px] bg-neuro-surfaceHighlight px-1.5 py-0.5 rounded text-neuro-textMuted">{history.length}</span>
              </div>
              
-             <div className="flex-1 overflow-y-auto custom-scrollbar space-y-2 pr-1">
-               {history.map(item => (
-                 <div key={item.id} onClick={() => loadFromHistory(item)} className="group p-3 rounded-lg bg-neuro-surface/40 hover:bg-neuro-surface border border-transparent hover:border-white/10 cursor-pointer transition-all">
-                   <div className="flex justify-between items-start mb-1.5">
-                     <h4 className="text-sm font-medium text-gray-200 truncate pr-2 w-40">{item.topic || "Untitled"}</h4>
-                     <div className="flex items-center opacity-0 group-hover:opacity-100 transition-all">
-                        <button onClick={(e) => renameHistoryItem(item.id, item.topic, e)} className="text-neuro-textMuted hover:text-white mr-2"><Edit2 size={13} /></button>
-                        <button onClick={(e) => deleteHistoryItem(item.id, e)} className="text-neuro-textMuted hover:text-red-400"><Trash2 size={13} /></button>
-                     </div>
+             <div className="flex bg-neuro-surface p-1 rounded-lg mb-6 shrink-0">
+                <button onClick={() => setSettingsTab('keys')} className={`flex-1 py-1.5 text-[10px] font-bold uppercase tracking-wide rounded-md transition-all ${settingsTab === 'keys' ? 'bg-neuro-surfaceHighlight text-white shadow-sm' : 'text-neuro-textMuted hover:text-white'}`}>API Keys</button>
+                <button onClick={() => setSettingsTab('storage')} className={`flex-1 py-1.5 text-[10px] font-bold uppercase tracking-wide rounded-md transition-all ${settingsTab === 'storage' ? 'bg-neuro-surfaceHighlight text-white shadow-sm' : 'text-neuro-textMuted hover:text-white'}`}>Storage</button>
+             </div>
+
+             <div className="flex-1 overflow-y-auto custom-scrollbar space-y-4 px-1">
+               {settingsTab === 'keys' && (
+                 <div className="space-y-4 animate-slide-up">
+                   <div className="space-y-2">
+                     <label className="text-xs text-neuro-textMuted font-medium flex items-center gap-2"><Sparkles size={12}/> Gemini API Key</label>
+                     <input type="password" value={config.apiKey} onChange={(e) => handleSaveApiKey(e.target.value, 'gemini')} className="w-full bg-neuro-bg/50 border border-white/10 text-white rounded-lg p-3 text-xs font-mono outline-none focus:border-neuro-primary" placeholder="AIza..." />
                    </div>
-                   <div className="flex items-center space-x-2 text-[10px] text-neuro-textMuted">
-                     <span className="capitalize">{item.mode.replace('_', ' ')}</span>
-                     <span className="w-0.5 h-0.5 bg-gray-500 rounded-full"></span>
-                     <span>{new Date(item.timestamp).toLocaleDateString()}</span>
+                   <div className="space-y-2">
+                     <label className="text-xs text-neuro-textMuted font-medium flex items-center gap-2"><Cpu size={12}/> Groq API Key</label>
+                     <input type="password" value={config.groqApiKey} onChange={(e) => handleSaveApiKey(e.target.value, 'groq')} className="w-full bg-neuro-bg/50 border border-white/10 text-white rounded-lg p-3 text-xs font-mono outline-none focus:border-neuro-primary" placeholder="gsk_..." />
                    </div>
                  </div>
-               ))}
-               {history.length === 0 && <div className="text-center text-xs text-neuro-textMuted py-10">No history yet.</div>}
-             </div>
-             <button onClick={() => setView(AppView.WORKSPACE)} className="mt-4 w-full py-2.5 bg-neuro-surfaceHighlight hover:bg-neuro-surface text-white text-xs font-medium rounded-lg transition-colors">Back to Workspace</button>
-          </div>
+               )}
 
-        ) : (
-          /* MAIN CONTROLS VIEW */
-          <div className="flex-1 flex flex-col space-y-6 overflow-y-auto custom-scrollbar pr-1">
-            
-            {/* Mode Selection */}
-            <div className="space-y-4">
-              <label className="text-xs font-bold text-neuro-textMuted uppercase tracking-wider flex items-center space-x-1">
-                <Layout size={12} /> <span>Cognitive Framework</span>
-              </label>
-              <div className="flex flex-col gap-2">
-                {Object.values(NoteMode).map((mode) => (
-                  <button
-                    key={mode}
-                    onClick={() => handleModeSwitch(mode)}
-                    className={`w-full text-left p-3 rounded-xl border transition-all duration-300 relative group overflow-hidden ${
-                      config.mode === mode && appState.currentView !== AppView.SYLLABUS
-                        ? 'bg-neuro-primary/10 border-neuro-primary shadow-[0_0_15px_rgba(129,140,248,0.1)]' 
-                        : 'bg-white/5 border-transparent hover:bg-white/10 hover:border-white/10'
-                    }`}
-                  >
-                    <div className="flex items-start">
-                      <div className={`mt-0.5 mr-3 shrink-0 p-2 rounded-lg ${config.mode === mode ? 'bg-neuro-primary text-white' : 'bg-gray-800 text-gray-500'}`}>
-                        {getModeIcon(mode)}
-                      </div>
-                      <div className="flex-1 min-w-0">
-                        <div className={`text-xs font-bold mb-1 flex items-center ${config.mode === mode ? 'text-white' : 'text-gray-300'}`}>
-                           {getModeLabel(mode)}
-                        </div>
-                        <p className={`text-[10px] leading-relaxed line-clamp-2 ${config.mode === mode ? 'text-gray-300' : 'text-gray-500 group-hover:text-gray-400'}`}>
-                           {getModeDescription(mode)}
-                        </p>
-                      </div>
-                    </div>
-                  </button>
-                ))}
-              </div>
-            </div>
-
-            {/* Experimental Features Section */}
-             <div className="space-y-4 pt-4 border-t border-white/5">
-              <label className="text-xs font-bold text-neuro-textMuted uppercase tracking-wider flex items-center space-x-1">
-                <FlaskConical size={12} className="text-neuro-accent" /> <span>NeuroLab (Experimental)</span>
-              </label>
-              <button
-                onClick={() => setView(AppView.SYLLABUS)}
-                className={`w-full text-left p-3 rounded-xl border transition-all duration-300 relative group overflow-hidden ${
-                  appState.currentView === AppView.SYLLABUS
-                    ? 'bg-neuro-accent/10 border-neuro-accent shadow-[0_0_15px_rgba(56,189,248,0.1)]' 
-                    : 'bg-white/5 border-transparent hover:bg-white/10 hover:border-white/10'
-                }`}
-              >
-                 <div className="flex items-start">
-                    <div className="mt-0.5 mr-3 shrink-0 p-2 rounded-lg bg-gray-800 text-neuro-accent">
-                      <ListChecks size={18} />
-                    </div>
-                    <div className="flex-1 min-w-0">
-                      <div className="text-xs font-bold mb-1 flex items-center text-gray-200">
-                         Curriculum Auto-Queue
-                      </div>
-                      <p className="text-[10px] leading-relaxed text-gray-500 group-hover:text-gray-400">
-                         Parse syllabus PDF into a sequential study queue.
-                      </p>
-                    </div>
+               {settingsTab === 'storage' && (
+                  <div className="space-y-4 animate-slide-up">
+                     <p className="text-[10px] text-gray-500">Configure Cloud Archive (Read/Write)</p>
+                     <div className="space-y-3 pt-2">
+                        <input type="text" value={config.supabaseUrl} onChange={(e) => handleSaveApiKey(e.target.value, 'sb_url')} placeholder="Supabase URL" className="w-full bg-neuro-bg/50 border border-white/10 rounded-lg p-2 text-xs text-white outline-none" />
+                        <input type="password" value={config.supabaseKey} onChange={(e) => handleSaveApiKey(e.target.value, 'sb_key')} placeholder="Supabase Anon Key" className="w-full bg-neuro-bg/50 border border-white/10 rounded-lg p-2 text-xs text-white outline-none" />
+                     </div>
+                     <button onClick={handleCopySQL} className="text-[10px] text-neuro-primary hover:underline flex items-center gap-1">
+                        {sqlCopied ? <Check size={10}/> : <Copy size={10} />} Copy SQL Schema
+                     </button>
                   </div>
-              </button>
-            </div>
+               )}
+             </div>
+             <button onClick={() => setView(AppView.WORKSPACE)} className="mt-4 w-full py-3 bg-neuro-surfaceHighlight hover:bg-neuro-surface text-white text-xs font-bold uppercase rounded-lg flex items-center justify-center gap-2"><ChevronRight size={14} /> Back</button>
+           </div>
+        ) : (
+           /* MAIN SIDEBAR (Files + Tools) */
+           <div className="flex-1 flex flex-col overflow-hidden">
+             
+             {/* File Explorer (NOW UNIFIED) */}
+             <div className="flex-1 overflow-hidden flex flex-col mb-4">
+                <FileSystem onSelectNote={handleSelectNoteFromFileSystem} activeNoteId={appState.activeNoteId} />
+             </div>
 
+             <div className="border-t border-white/5 pt-4 space-y-4 shrink-0">
+               
+               {/* PRIMARY NAVIGATION */}
+               <div className="space-y-2">
+                  <button onClick={() => setView(AppView.WORKSPACE)} className="w-full flex items-center gap-3 p-2 rounded-lg hover:bg-white/5 text-gray-400 hover:text-white transition-colors bg-white/5 border border-white/5">
+                      <Home size={16} className="text-neuro-primary"/> <span className="text-xs font-bold">Main Menu</span>
+                  </button>
 
-            {/* Model Engine */}
-            <div className="space-y-3 pt-4 border-t border-white/5">
-              <label className="text-xs font-bold text-neuro-textMuted uppercase tracking-wider flex items-center space-x-1">
-                <Cpu size={12} /> <span>AI Engine</span>
-              </label>
-              
-              <div className="flex bg-neuro-surface p-0.5 rounded-lg">
-                <button onClick={() => switchProvider(AIProvider.GEMINI)} className={`flex-1 py-1.5 text-[10px] font-bold rounded-md transition-all ${config.provider === AIProvider.GEMINI ? 'bg-neuro-primary text-white shadow-sm' : 'text-neuro-textMuted'}`}>Gemini</button>
-                <button onClick={() => switchProvider(AIProvider.GROQ)} className={`flex-1 py-1.5 text-[10px] font-bold rounded-md transition-all ${config.provider === AIProvider.GROQ ? 'bg-orange-600 text-white shadow-sm' : 'text-neuro-textMuted'}`}>Groq</button>
-              </div>
+                  <button onClick={() => setView(AppView.ARCHIVE)} className="w-full flex items-center gap-3 p-2 rounded-lg hover:bg-white/5 text-gray-400 hover:text-white transition-colors">
+                      <Cloud size={16} /> <span className="text-xs font-bold">Neural Vault (Full)</span>
+                  </button>
 
-              <div className="relative">
-                <select 
-                  value={config.model}
-                  onChange={(e) => setConfig({ ...config, model: e.target.value as AppModel })}
-                  className="w-full bg-neuro-surface/50 border border-white/10 text-white rounded-lg p-2.5 text-xs outline-none focus:border-neuro-primary appearance-none hover:bg-neuro-surface transition-colors"
-                >
-                  {config.provider === AIProvider.GEMINI ? (
-                    <>
-                      <option value={AppModel.GEMINI_2_5_FLASH}>Gemini 2.5 Flash</option>
-                      <option value={AppModel.GEMINI_2_5_PRO}>Gemini 2.5 Pro</option>
-                      <option value={AppModel.GEMINI_3_FLASH}>Gemini 3 Flash (Preview)</option>
-                    </>
-                  ) : (
-                    <>
-                      <option value={AppModel.GROQ_LLAMA_3_3_70B}>Llama 3.3 70B</option>
-                      <option value={AppModel.GROQ_LLAMA_3_1_8B}>Llama 3.1 8B</option>
-                    </>
-                  )}
-                </select>
-              </div>
-            </div>
+                  <button onClick={() => setView(AppView.GRAPH)} className="w-full flex items-center gap-3 p-2 rounded-lg hover:bg-white/5 text-gray-400 hover:text-white transition-colors">
+                      <Maximize2 size={16} /> <span className="text-xs font-bold">Synapse Graph</span>
+                  </button>
+               </div>
 
-            {/* Bottom Actions */}
-            <div className="mt-auto pt-6 border-t border-white/5 grid grid-cols-2 gap-2">
-               <button onClick={() => setView(AppView.HISTORY)} className="flex items-center justify-center space-x-2 p-2 rounded-lg hover:bg-white/5 text-neuro-textMuted hover:text-white transition-colors">
-                  <Database size={16} /> <span className="text-xs font-medium">History</span>
+               {/* Settings Grid */}
+               <div className="grid grid-cols-2 gap-2">
+                 <button onClick={() => setView(AppView.SETTINGS)} className="flex flex-col items-center justify-center space-y-1 p-2 rounded-lg hover:bg-white/5 text-gray-500 hover:text-white">
+                    <Settings2 size={16} /> <span className="text-[9px] font-bold">CONFIG</span>
+                 </button>
+                 <button onClick={() => setView(AppView.SYLLABUS)} className="flex flex-col items-center justify-center space-y-1 p-2 rounded-lg hover:bg-white/5 text-gray-500 hover:text-white">
+                    <ListChecks size={16} /> <span className="text-[9px] font-bold">SYLLABUS</span>
+                 </button>
+               </div>
+               
+               {/* Admin (Internal) */}
+               <button onClick={() => setShowAdminModal(true)} className="w-full flex items-center gap-3 p-2 rounded-lg hover:bg-white/5 text-gray-500 hover:text-red-400 transition-colors mt-2 border border-transparent hover:border-red-900/30">
+                  <ShieldCheck size={16} /> <span className="text-xs font-bold">Admin Forge</span>
                </button>
-               <button onClick={() => setView(AppView.SETTINGS)} className="flex items-center justify-center space-x-2 p-2 rounded-lg hover:bg-white/5 text-neuro-textMuted hover:text-white transition-colors">
-                  <Settings2 size={16} /> <span className="text-xs font-medium">Settings</span>
-               </button>
-            </div>
-          </div>
+             </div>
+           </div>
         )}
       </aside>
 
@@ -520,167 +423,260 @@ const App: React.FC = () => {
         
         {/* Background Gradients */}
         <div className="absolute top-0 left-0 w-full h-full overflow-hidden pointer-events-none z-0">
-          <div className="absolute top-[-10%] left-[20%] w-[500px] h-[500px] bg-neuro-primary/5 rounded-full blur-[120px]"></div>
-          <div className="absolute bottom-[-10%] right-[10%] w-[400px] h-[400px] bg-neuro-accent/5 rounded-full blur-[100px]"></div>
+          <div className="absolute top-[-20%] left-[10%] w-[600px] h-[600px] bg-neuro-primary/5 rounded-full blur-[120px]"></div>
+          <div className="absolute bottom-[-10%] right-[5%] w-[500px] h-[500px] bg-neuro-accent/5 rounded-full blur-[100px]"></div>
         </div>
 
-        {/* Content Container */}
-        <div className="relative z-10 flex-1 flex flex-col h-full overflow-y-auto custom-scrollbar p-6 md:p-10">
+        {/* Content Container (FIXED: Overflow logic for Graph View) */}
+        <div className={`relative z-10 flex-1 flex flex-col h-full ${appState.currentView === AppView.GRAPH ? 'p-0 overflow-hidden' : 'p-4 md:p-8 lg:p-10 overflow-y-auto custom-scrollbar'}`}>
           
-          {/* Top Bar Status */}
-          <div className="flex justify-between items-center mb-8">
-            <div>
-               <h2 className="text-2xl font-bold text-white tracking-tight">
-                  {appState.currentView === AppView.SYLLABUS ? 'NeuroLab' : 'Workspace'}
-               </h2>
-               <p className="text-neuro-textMuted text-sm">
-                 {appState.generatedContent ? 'Reviewing Output' : appState.currentView === AppView.SYLLABUS ? 'Experimental Curriculum Parser' : 'New Note Generation'}
-               </p>
-            </div>
-            {!appState.generatedContent && (
-               <div className="flex items-center space-x-3 text-xs bg-neuro-surface/50 border border-white/5 px-3 py-1.5 rounded-full backdrop-blur-sm">
-                 <div className={`flex items-center space-x-1.5 ${config.apiKey || config.groqApiKey ? 'text-emerald-400' : 'text-red-400'}`}>
-                    <Activity size={12} />
-                    <span>API {getApiKeyStatus()}</span>
-                 </div>
-                 <span className="w-px h-3 bg-white/10"></span>
-                 <div className="text-neuro-textMuted">
-                    {config.storageType === StorageType.LOCAL ? 'Local Save' : 'Cloud Sync'}
-                 </div>
+          {/* Top Bar (Only show if NOT in Graph View for maximum immersion) */}
+          {appState.currentView !== AppView.GRAPH && (
+            <div className="flex justify-between items-start mb-6 shrink-0">
+               <div>
+                  <h2 className="text-2xl md:text-3xl font-bold text-white tracking-tight flex items-center gap-3">
+                     {appState.currentView === AppView.SYLLABUS ? <ListChecks className="text-neuro-accent"/> : 
+                      appState.currentView === AppView.ARCHIVE ? <Cloud className="text-cyan-400"/> : <Sparkles className="text-neuro-primary"/>}
+                     
+                     {appState.currentView === AppView.SYLLABUS ? 'Syllabus Manager' : 
+                      appState.currentView === AppView.ARCHIVE ? 'Neural Vault' : 'Workspace'}
+                  </h2>
+                  <p className="text-gray-400 text-sm mt-1 font-medium">
+                    {appState.generatedContent ? `Editing: ${noteData.topic}` : 'Medical Knowledge Generator'}
+                  </p>
                </div>
-            )}
-             {appState.generatedContent && (
-               <button 
-                onClick={() => setAppState(prev => ({ ...prev, generatedContent: null }))}
-                className="flex items-center space-x-2 px-4 py-2 bg-neuro-surface hover:bg-neuro-surfaceHighlight border border-white/5 rounded-lg text-sm text-white transition-all shadow-lg"
-               >
-                <X size={14} />
-                <span>Close Editor</span>
-               </button>
-            )}
-          </div>
+
+               {appState.generatedContent && (
+                 <button 
+                    onClick={() => {
+                       setAppState(prev => ({ ...prev, generatedContent: null, currentView: AppView.WORKSPACE, activeNoteId: null }));
+                       setNoteData(prev => ({...prev, topic: ''}));
+                    }}
+                    className="px-4 py-2 bg-gray-800 hover:bg-gray-700 text-white text-xs font-bold uppercase rounded-lg border border-gray-700 hover:border-gray-500 transition-all shadow-lg flex items-center gap-2"
+                 >
+                    <X size={14} /> Close Editor
+                 </button>
+               )}
+            </div>
+          )}
 
           {appState.error && (
-            <div className="mb-6 bg-red-500/10 border border-red-500/20 text-red-200 p-4 rounded-xl flex items-start space-x-3 animate-fade-in">
-               <AlertCircle className="shrink-0 mt-0.5" size={18} />
+            <div className="mb-6 bg-red-950/30 border border-red-500/30 text-red-200 p-4 rounded-xl flex items-start space-x-3 animate-fade-in backdrop-blur-md mx-4 mt-4">
+               <AlertCircle className="shrink-0 mt-0.5 text-red-400" size={18} />
                <div>
-                 <h4 className="font-bold text-sm">System Alert</h4>
+                 <h4 className="font-bold text-sm text-red-100">System Alert</h4>
                  <p className="text-xs opacity-80 mt-1 leading-relaxed">{appState.error}</p>
                </div>
             </div>
           )}
 
           {appState.isLoading ? (
-             <div className="flex flex-col items-center justify-center flex-1 space-y-8 animate-fade-in pb-20">
+             <div className="flex flex-col items-center justify-center flex-1 space-y-6 animate-fade-in pb-20">
                <div className="relative">
-                 <div className="w-24 h-24 border-4 border-neuro-surface rounded-full"></div>
-                 <div className="w-24 h-24 border-4 border-neuro-primary border-t-transparent border-r-transparent rounded-full absolute top-0 animate-spin"></div>
-                 <div className="absolute inset-0 flex items-center justify-center animate-pulse">
-                    <BrainCircuit size={32} className="text-white opacity-50" />
-                 </div>
+                 <div className="w-20 h-20 border-4 border-gray-800 rounded-full"></div>
+                 <div className="w-20 h-20 border-4 border-neuro-primary border-t-transparent border-r-transparent rounded-full absolute top-0 animate-spin"></div>
                </div>
-               <div className="text-center space-y-2">
-                 <h3 className="text-xl font-medium text-white tracking-tight">Synthesizing Logic</h3>
-                 <p className="text-neuro-textMuted text-sm font-mono">{appState.progressStep}</p>
+               <div className="text-center space-y-1">
+                 <h3 className="text-lg font-bold text-white tracking-tight">Processing...</h3>
+                 <p className="text-neuro-textMuted text-xs font-mono bg-gray-900/50 px-3 py-1 rounded-full">{appState.progressStep}</p>
+                 <div className="text-[10px] text-gray-500 mt-2 font-mono">{config.provider.toUpperCase()} ENGINE ACTIVE</div>
                </div>
              </div>
+          ) : appState.currentView === AppView.GRAPH ? (
+             /* SYNAPSE GRAPH VIEW (Lazy Loaded) */
+             <Suspense fallback={
+               <div className="flex flex-col items-center justify-center h-full text-gray-500">
+                  <RefreshCw className="animate-spin mb-2" />
+                  <span className="text-xs tracking-widest">LOADING NEURAL MAP...</span>
+               </div>
+             }>
+                <div className="flex-1 animate-fade-in h-full w-full">
+                  <GraphView onSelectNote={handleSelectNoteFromFileSystem} />
+                </div>
+             </Suspense>
+          ) : appState.currentView === AppView.ARCHIVE ? (
+             /* NEURAL VAULT VIEW */
+             <div className="flex-1 animate-slide-up h-full flex flex-col">
+                <NeuralVault onSelectNote={handleSelectNoteFromFileSystem} onImportCloud={handleRetrieveFromCloud} />
+             </div>
           ) : appState.generatedContent ? (
-             <div className="flex-1 animate-slide-up">
-                <OutputDisplay content={appState.generatedContent} topic={noteData.topic} />
+             /* NOTE EDITOR VIEW (Lazy Loaded) */
+             <div className="flex-1 animate-slide-up h-full">
+               <Suspense fallback={<div className="p-10 text-center text-gray-500">Loading Editor...</div>}>
+                  <OutputDisplay 
+                    content={appState.generatedContent} 
+                    topic={noteData.topic} 
+                    noteId={appState.activeNoteId || undefined}
+                    onUpdateContent={handleUpdateContent}
+                    onManualSave={handleManualSave}
+                  />
+               </Suspense>
              </div>
           ) : appState.currentView === AppView.SYLLABUS ? (
              /* SYLLABUS MANAGER VIEW */
              <SyllabusFlow config={config} onSelectTopic={handleSelectSyllabusTopic} />
           ) : (
-            /* --- INPUT FORM --- */
-            <div className="max-w-6xl mx-auto w-full grid grid-cols-1 lg:grid-cols-12 gap-8 animate-fade-in pb-10">
+            /* --- WORKSPACE INPUT FORM --- */
+            <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 h-full pb-6">
                
-               {/* Left: Context Input (4 cols) */}
-               <div className="lg:col-span-5 space-y-6">
-                 {/* Card 1: Topic */}
-                 <div className="bg-neuro-surface border border-neuro-surfaceHighlight p-6 rounded-2xl shadow-lg">
-                   <div className="flex items-center space-x-2 text-neuro-primary mb-2">
-                      <Layers size={20} />
-                      <h3 className="font-bold text-base text-white">Subject & Context</h3>
-                   </div>
-                   <p className="text-xs text-neuro-textMuted mb-5 leading-relaxed">
-                     Define the core subject matter. This serves as the anchor for the entire note generation process.
-                   </p>
-                   
-                   <div className="space-y-5">
-                      <div className="space-y-2">
-                        <label className="text-xs font-bold text-gray-400 uppercase tracking-wider">Primary Topic</label>
-                        <input 
-                          type="text"
-                          value={noteData.topic}
-                          onChange={(e) => setNoteData({ ...noteData, topic: e.target.value })}
-                          placeholder="e.g. Heart Failure, Krebs Cycle, Dermatopathology..."
-                          className="w-full bg-gray-950/50 border border-gray-700 rounded-xl p-4 text-sm text-white focus:border-neuro-primary focus:ring-1 focus:ring-neuro-primary outline-none transition-all placeholder:text-gray-600"
-                        />
-                        <p className="text-[10px] text-gray-500">
-                          *Be specific (e.g., instead of "Heart", use "Congestive Heart Failure Pathophysiology").
-                        </p>
-                      </div>
+               {/* --- LEFT DECK: CONTEXT (Input) --- */}
+               <div className="lg:col-span-5 flex flex-col gap-5 animate-slide-up" style={{animationDelay: '0.1s'}}>
+                 
+                 {/* 1. Topic Input */}
+                 <div className="bg-neuro-surface/50 border border-white/5 p-5 rounded-2xl shadow-xl backdrop-blur-sm group focus-within:border-neuro-primary/50 transition-colors">
+                    <label className="text-[10px] font-bold text-neuro-primary uppercase tracking-widest mb-3 flex items-center gap-2">
+                       <Layers size={14} /> Subject Matter
+                    </label>
+                    <input 
+                      type="text"
+                      value={noteData.topic}
+                      onChange={(e) => setNoteData({ ...noteData, topic: e.target.value })}
+                      placeholder="e.g. Heart Failure Pathophysiology"
+                      className="w-full bg-black/20 border border-gray-700 rounded-xl p-4 text-base text-white focus:border-neuro-primary focus:ring-1 focus:ring-neuro-primary outline-none transition-all placeholder:text-gray-600 font-medium"
+                      autoFocus
+                    />
+                 </div>
 
-                      <div className={`space-y-2 pt-4 border-t border-gray-700/50 ${config.provider === AIProvider.GROQ ? 'opacity-50 pointer-events-none' : ''}`}>
-                         <div className="flex justify-between items-center">
-                            <label className="text-xs font-bold text-gray-400 uppercase tracking-wider">Reference Materials</label>
-                            {config.provider === AIProvider.GROQ && <span className="text-orange-400 text-[10px] font-bold border border-orange-400/30 px-2 py-0.5 rounded">Text Only Mode</span>}
-                         </div>
-                         <FileUploader files={noteData.files} onFilesChange={(files) => setNoteData({ ...noteData, files })} />
-                         <p className="text-[10px] text-gray-500 leading-normal">
-                           Upload PDF lectures or images. The AI will prioritize this content over general knowledge.
-                         </p>
-                      </div>
-                   </div>
+                 {/* 2. Mode Grid */}
+                 <div className="bg-neuro-surface/50 border border-white/5 p-5 rounded-2xl shadow-xl backdrop-blur-sm">
+                    <label className="text-[10px] font-bold text-gray-500 uppercase tracking-widest mb-3 block">Instruction Mode</label>
+                    <div className="grid grid-cols-2 gap-2">
+                       {Object.values(NoteMode).map((mode) => (
+                          <button key={mode} onClick={() => handleModeSwitch(mode)} className={`p-3 rounded-xl text-xs font-bold flex flex-col items-center justify-center gap-2 border transition-all ${config.mode === mode ? 'bg-neuro-primary/20 border-neuro-primary text-white' : 'bg-black/20 border-transparent text-gray-500 hover:text-gray-300'}`}>
+                             {getModeIcon(mode)} 
+                             <span className="truncate text-[10px]">{getModeLabel(mode)}</span>
+                          </button>
+                       ))}
+                    </div>
+                 </div>
+
+                 {/* 3. File Context */}
+                 <div className={`bg-neuro-surface/50 border border-white/5 p-5 rounded-2xl shadow-xl backdrop-blur-sm transition-opacity flex-1 ${config.provider === AIProvider.GROQ ? 'opacity-50 pointer-events-none grayscale' : ''}`}>
+                    <div className="flex justify-between items-center mb-4">
+                      <label className="text-[10px] font-bold text-neuro-primary uppercase tracking-widest flex items-center gap-2">
+                         <FileText size={14} /> Context Data
+                      </label>
+                      {config.provider === AIProvider.GROQ && <span className="text-orange-400 text-[9px] font-bold border border-orange-400/30 px-1.5 py-0.5 rounded">TEXT ONLY</span>}
+                    </div>
+                    <FileUploader files={noteData.files} onFilesChange={(files) => setNoteData({ ...noteData, files })} />
                  </div>
                </div>
 
-               {/* Right: Structure & Action (8 cols) */}
-               <div className="lg:col-span-7 flex flex-col gap-6">
-                 <div className="bg-neuro-surface border border-neuro-surfaceHighlight p-6 rounded-2xl shadow-lg flex-1 flex flex-col min-h-[600px]">
-                    <div className="flex items-center justify-between mb-2">
-                      <div className="flex items-center space-x-2 text-neuro-primary">
-                        <BookOpen size={20} />
-                        <h3 className="font-bold text-base text-white">Target Structure</h3>
-                      </div>
-                      <span className="text-[10px] uppercase font-bold text-neuro-textMuted bg-gray-950/50 border border-gray-700 px-3 py-1 rounded-full">
-                        Active Mode: {getModeLabel(config.mode)}
-                      </span>
+               {/* --- RIGHT DECK: BLUEPRINT (Control) --- */}
+               <div className="lg:col-span-7 flex flex-col gap-5 animate-slide-up" style={{animationDelay: '0.2s'}}>
+                 
+                 {/* 1. NEURAL ENGINE SELECTOR (New Feature) */}
+                 <div className="bg-neuro-surface/50 border border-white/5 p-5 rounded-2xl shadow-xl backdrop-blur-sm">
+                    <div className="flex justify-between items-center mb-3">
+                       <label className="text-[10px] font-bold text-neuro-primary uppercase tracking-widest flex items-center gap-2">
+                         <Bot size={14} /> Neural Engine
+                       </label>
+                       {/* Provider Toggle */}
+                       <div className="flex bg-gray-900/50 p-1 rounded-lg border border-white/5">
+                          <button 
+                             onClick={() => handleProviderSwitch(AIProvider.GEMINI)} 
+                             className={`px-3 py-1 rounded-md text-[10px] font-bold flex items-center gap-1.5 transition-all ${config.provider === AIProvider.GEMINI ? 'bg-indigo-600 text-white shadow' : 'text-gray-500 hover:text-gray-300'}`}
+                          >
+                             <Sparkles size={10}/> Gemini
+                          </button>
+                          <button 
+                             onClick={() => handleProviderSwitch(AIProvider.GROQ)} 
+                             className={`px-3 py-1 rounded-md text-[10px] font-bold flex items-center gap-1.5 transition-all ${config.provider === AIProvider.GROQ ? 'bg-orange-600 text-white shadow' : 'text-gray-500 hover:text-gray-300'}`}
+                          >
+                             <Cpu size={10}/> Groq
+                          </button>
+                       </div>
+                    </div>
+
+                    <div className="relative">
+                       <select 
+                          value={config.model}
+                          onChange={(e) => setConfig(prev => ({...prev, model: e.target.value as AppModel}))}
+                          className="w-full bg-black/30 border border-gray-700 rounded-xl p-3 text-xs text-white font-mono outline-none focus:border-neuro-primary appearance-none cursor-pointer hover:bg-black/40 transition-colors"
+                       >
+                          {config.provider === AIProvider.GEMINI 
+                             ? GEMINI_MODELS.map(m => <option key={m.value} value={m.value}>{m.label}</option>)
+                             : groqModels.map(m => <option key={m.value} value={m.value}>{m.label}</option>)
+                          }
+                       </select>
+                       <ChevronRight size={14} className="absolute right-3 top-3.5 text-gray-500 pointer-events-none rotate-90"/>
                     </div>
                     
-                    <p className="text-xs text-neuro-textMuted mb-5 leading-relaxed">
-                      This outline dictates the flow of the note. The AI will fill in each section exhaustively. You can edit this skeleton to fit your specific syllabus.
-                    </p>
+                    {/* Model Badges */}
+                    <div className="flex gap-2 mt-2">
+                       {(config.provider === AIProvider.GEMINI ? GEMINI_MODELS : groqModels).map(m => (
+                          m.value === config.model && (
+                             <span key={m.value} className="text-[9px] font-bold px-2 py-0.5 rounded bg-white/5 text-gray-400 border border-white/5">
+                                {m.badge}
+                             </span>
+                          )
+                       ))}
+                    </div>
+                 </div>
 
-                    <div className="relative flex-1">
+                 {/* 2. Structure Blueprint */}
+                 <div className="bg-neuro-surface/50 border border-white/5 p-5 rounded-2xl shadow-xl backdrop-blur-sm flex-1 flex flex-col min-h-[300px]">
+                    <div className="flex items-center justify-between mb-4">
+                       <label className="text-[10px] font-bold text-neuro-primary uppercase tracking-widest flex items-center gap-2">
+                         <BookOpen size={14} /> Structural Blueprint
+                       </label>
+                       
+                       <button 
+                           onClick={handleAutoStructure}
+                           disabled={isStructLoading || !noteData.topic}
+                           className="flex items-center gap-2 px-3 py-1.5 rounded-lg text-[10px] font-bold uppercase transition-all bg-neuro-surface hover:bg-gray-700 border border-gray-700 hover:border-gray-500 text-gray-300 hover:text-white"
+                        >
+                           {isStructLoading ? <RefreshCw size={12} className="animate-spin"/> : <Wand2 size={12} />}
+                           {isStructLoading ? 'Drafting...' : 'Auto-Draft'}
+                        </button>
+                    </div>
+
+                    <div className="relative flex-1 group">
                       <textarea 
                         value={noteData.structure}
                         onChange={(e) => setNoteData({ ...noteData, structure: e.target.value })}
-                        className="absolute inset-0 w-full h-full bg-gray-950/50 border border-gray-700 rounded-xl p-5 text-sm font-mono text-neuro-text placeholder:text-gray-700 focus:border-neuro-primary focus:ring-1 focus:ring-neuro-primary outline-none resize-none transition-all leading-7"
-                        placeholder="Define your note skeleton here..."
+                        className="absolute inset-0 w-full h-full bg-black/20 border border-gray-700 rounded-xl p-5 text-sm font-mono text-gray-300 placeholder:text-gray-700 focus:border-neuro-primary focus:ring-1 focus:ring-neuro-primary outline-none resize-none transition-all leading-6 custom-scrollbar"
+                        placeholder="# 1. Definition..."
                       />
                     </div>
                  </div>
 
+                 {/* 3. Action Button */}
                  <button 
                   onClick={handleGenerate}
-                  disabled={config.provider === AIProvider.GEMINI ? !config.apiKey : !config.groqApiKey}
-                  className={`w-full py-5 rounded-xl font-bold text-white shadow-xl transition-all transform hover:scale-[1.01] active:scale-[0.99] flex items-center justify-center space-x-3 border border-white/10
-                    ${(config.provider === AIProvider.GEMINI ? !config.apiKey : !config.groqApiKey) 
+                  disabled={config.provider === AIProvider.GEMINI ? false : !config.groqApiKey}
+                  className={`w-full py-5 rounded-xl font-bold text-white shadow-[0_0_30px_rgba(79,70,229,0.3)] transition-all transform hover:scale-[1.01] active:scale-[0.99] flex items-center justify-center space-x-3 border border-white/10
+                    ${(config.provider === AIProvider.GEMINI ? false : !config.groqApiKey) 
                       ? 'bg-gray-800 cursor-not-allowed opacity-50 text-gray-400' 
-                      : 'bg-gradient-to-r from-indigo-600 to-violet-600 hover:from-indigo-500 hover:to-violet-500 shadow-indigo-500/20'
+                      : 'bg-gradient-to-r from-neuro-primary to-indigo-600 hover:from-neuro-primaryHover hover:to-indigo-500'
                     }`}
                  >
-                   <Sparkles size={22} className={!(config.provider === AIProvider.GEMINI ? !config.apiKey : !config.groqApiKey) ? 'animate-pulse' : ''} />
-                   <span className="tracking-wide text-lg">GENERATE MEDICAL NOTE</span>
+                   <Sparkles size={20} className={!(config.provider === AIProvider.GEMINI ? false : !config.groqApiKey) ? 'animate-pulse' : ''} />
+                   <span className="tracking-widest text-sm uppercase">Initiate Sequence</span>
                  </button>
                </div>
+
             </div>
           )}
 
         </div>
+        
+        {/* Footer Info */}
+        <div className="absolute bottom-3 right-5 z-50 text-[10px] text-gray-600 font-mono pointer-events-none select-none">
+          NEURONOTE.AI // SYSTEM ACTIVE
+        </div>
       </main>
+
+      {/* --- INTERNAL ADMIN MODAL --- */}
+      {showAdminModal && (
+        <div className="fixed inset-0 z-[100] bg-black/90 backdrop-blur-xl flex items-center justify-center p-4 animate-fade-in">
+           <div className="bg-[#0f172a] border border-gray-800 rounded-2xl shadow-2xl w-full max-w-2xl overflow-hidden flex flex-col h-[85vh]">
+              <Suspense fallback={<div className="flex items-center justify-center h-full text-white">Loading Forge...</div>}>
+                 <AdminPanel onClose={() => setShowAdminModal(false)} defaultMode="create" />
+              </Suspense>
+           </div>
+        </div>
+      )}
     </div>
   );
 };

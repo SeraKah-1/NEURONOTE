@@ -1,10 +1,11 @@
+
 import { createClient, SupabaseClient } from '@supabase/supabase-js';
-import { HistoryItem, SavedQueue, StorageType } from '../types';
+import { HistoryItem, SavedQueue, NoteMode, Folder } from '../types';
 
 export class StorageService {
   private static instance: StorageService;
   private supabase: SupabaseClient | null = null;
-  private currentType: StorageType = StorageType.LOCAL;
+  private isSupabaseReady: boolean = false;
 
   private constructor() {}
 
@@ -16,131 +17,308 @@ export class StorageService {
   }
 
   public initSupabase(url: string, key: string) {
-    if (url && key) {
-      this.supabase = createClient(url, key);
-    }
-  }
+    const cleanUrl = url?.trim();
+    const cleanKey = key?.trim();
 
-  public setStorageType(type: StorageType) {
-    this.currentType = type;
-  }
-
-  public getStorageType(): StorageType {
-    return this.currentType;
-  }
-
-  /* --- NOTE HISTORY METHODS --- */
-
-  public async saveNote(note: HistoryItem): Promise<boolean> {
-    if (this.currentType === StorageType.LOCAL) {
+    if (cleanUrl && cleanKey && cleanUrl.startsWith('http')) {
       try {
-        const stored = localStorage.getItem('neuro_history');
-        const history: HistoryItem[] = stored ? JSON.parse(stored) : [];
-        const updated = [note, ...history].slice(0, 50); // Keep last 50 locally
-        localStorage.setItem('neuro_history', JSON.stringify(updated));
-        return true;
+        this.supabase = createClient(cleanUrl, cleanKey, {
+          auth: {
+            persistSession: false,
+            autoRefreshToken: false,
+          }
+        });
+        this.isSupabaseReady = true;
+        console.log("✅ Supabase Connected");
       } catch (e) {
-        console.error("Local Storage Error", e);
-        return false;
+        console.error("❌ Failed to init Supabase", e);
+        this.isSupabaseReady = false;
       }
     } else {
-      if (!this.supabase) throw new Error("Supabase client not initialized");
-      
-      const { error } = await this.supabase
-        .from('neuro_notes')
-        .insert([{
-          id: note.id,
-          topic: note.topic,
-          content: note.content,
-          mode: note.mode,
-          provider: note.provider,
-          timestamp: note.timestamp
-        }]);
-      
-      if (error) {
-        console.error("Supabase Error", error);
-        throw new Error(`Supabase Error: ${error.message}`);
-      }
-      return true;
+      this.isSupabaseReady = false;
     }
   }
 
-  public async getNotes(): Promise<HistoryItem[]> {
-    if (this.currentType === StorageType.LOCAL) {
+  public isCloudReady() {
+    return this.isSupabaseReady;
+  }
+
+  /* ========================================================================
+     AUTO-TAGGING HEURISTICS
+  ======================================================================== */
+  private generateTags(topic: string, mode: NoteMode, content: string = ''): string[] {
+    const tags = new Set<string>();
+    const lowerTopic = topic.toLowerCase();
+
+    // 1. EXTRACT HASHTAGS FROM CONTENT (User Defined)
+    // Regex matches #tagname (alphanumeric, underscores, hyphens)
+    const hashtagRegex = /#([\w-]+)/g;
+    let match;
+    while ((match = hashtagRegex.exec(content)) !== null) {
+      tags.add(match[1]); // Add the tag without the '#'
+    }
+
+    // 2. Mode Tags (System)
+    if (mode === NoteMode.CHEAT_CODES) tags.add('Exam-Prep');
+    if (mode === NoteMode.FIRST_PRINCIPLES) tags.add('Mechanism');
+    
+    // 3. System Heuristics (Fallback)
+    if (lowerTopic.match(/heart|cardio|acs|mi|stemi|hypertens/)) tags.add('Cardiology');
+    if (lowerTopic.match(/lung|pneumo|asthma|copd|resp/)) tags.add('Pulmonology');
+    if (lowerTopic.match(/brain|neuro|stroke|seizure|head/)) tags.add('Neurology');
+    if (lowerTopic.match(/kidney|renal|nephro|uti/)) tags.add('Nephrology');
+    if (lowerTopic.match(/liver|hepato|gastro|stomach|bowel/)) tags.add('Gastroenterology');
+    if (lowerTopic.match(/hormone|diabet|thyroid|endo/)) tags.add('Endocrinology');
+    if (lowerTopic.match(/drug|pharma|dose|medic/)) tags.add('Pharmacology');
+    if (lowerTopic.match(/trauma|emerg|shock|arrest/)) tags.add('Emergency');
+    
+    return Array.from(tags);
+  }
+
+  /* ========================================================================
+     FOLDER SYSTEM
+  ======================================================================== */
+  public saveFolder(folder: Folder): void {
+    const folders = this.getFolders();
+    const idx = folders.findIndex(f => f.id === folder.id);
+    if (idx >= 0) folders[idx] = folder;
+    else folders.push(folder);
+    localStorage.setItem('neuro_folders', JSON.stringify(folders));
+  }
+
+  public getFolders(): Folder[] {
+    try {
+      const stored = localStorage.getItem('neuro_folders');
+      return stored ? JSON.parse(stored) : [];
+    } catch { return []; }
+  }
+
+  public deleteFolder(id: string): void {
+    const folders = this.getFolders().filter(f => f.id !== id);
+    localStorage.setItem('neuro_folders', JSON.stringify(folders));
+    
+    // Move notes in this folder to root
+    const notes = this.getLocalNotes();
+    const updatedNotes = notes.map(n => n.folderId === id ? { ...n, folderId: null } : n);
+    localStorage.setItem('neuro_history', JSON.stringify(updatedNotes));
+  }
+
+  public moveNoteToFolder(noteId: string, folderId: string | null): void {
+    const notes = this.getLocalNotes();
+    const note = notes.find(n => n.id === noteId);
+    if (note) {
+      note.folderId = folderId;
+      this.saveNoteLocal(note);
+    }
+  }
+
+  /* ========================================================================
+     LOCAL STORAGE SYSTEM
+  ======================================================================== */
+
+  public saveNoteLocal(note: HistoryItem): void {
+    const notes = this.getLocalNotes();
+    
+    // INTELLIGENT TAGGING:
+    // Extract tags from content (hashtags) + System heuristics
+    // Merge with existing tags if any
+    const detectedTags = this.generateTags(note.topic, note.mode, note.content);
+    
+    // Merge existing tags, detected tags, and preserve existing folderId if not specified
+    const manualTags = note.tags || [];
+    const mergedTags = Array.from(new Set([...manualTags, ...detectedTags]));
+
+    note.tags = mergedTags;
+
+    // Preserve folderId if it exists in storage and isn't provided in the update
+    const existingIdx = notes.findIndex(n => n.id === note.id);
+    if (existingIdx >= 0) {
+      if (note.folderId === undefined) {
+         note.folderId = notes[existingIdx].folderId;
+      }
+      notes[existingIdx] = note;
+    } else {
+      notes.unshift(note);
+    }
+    localStorage.setItem('neuro_history', JSON.stringify(notes));
+  }
+
+  // --- CONNECT TWO NOTES ---
+  public connectNotes(sourceId: string, targetId: string): void {
+    const notes = this.getLocalNotes();
+    const sourceIdx = notes.findIndex(n => n.id === sourceId);
+    const targetIdx = notes.findIndex(n => n.id === targetId);
+
+    if (sourceIdx === -1 || targetIdx === -1) return;
+
+    const source = notes[sourceIdx];
+    const target = notes[targetIdx];
+
+    // Strategy: Add the TOPIC of the other note as a tag to create a link.
+    // Clean topic to be tag-safe (no spaces)
+    const sourceTag = source.topic.replace(/\s+/g, '-');
+    const targetTag = target.topic.replace(/\s+/g, '-');
+
+    // Add target's tag to source
+    if (!source.tags) source.tags = [];
+    if (!source.tags.includes(targetTag)) source.tags.push(targetTag);
+
+    // Add source's tag to target (Bi-directional)
+    if (!target.tags) target.tags = [];
+    if (!target.tags.includes(sourceTag)) target.tags.push(sourceTag);
+
+    // Save
+    notes[sourceIdx] = source;
+    notes[targetIdx] = target;
+    localStorage.setItem('neuro_history', JSON.stringify(notes));
+  }
+
+  public getLocalNotes(): HistoryItem[] {
+    try {
       const stored = localStorage.getItem('neuro_history');
       return stored ? JSON.parse(stored) : [];
-    } else {
-      if (!this.supabase) throw new Error("Supabase client not initialized");
+    } catch { return []; }
+  }
 
-      const { data, error } = await this.supabase
-        .from('neuro_notes')
-        .select('*')
-        .order('timestamp', { ascending: false })
-        .limit(50);
+  public deleteNoteLocal(id: string): void {
+    const notes = this.getLocalNotes();
+    const updated = notes.filter(n => n.id !== id);
+    localStorage.setItem('neuro_history', JSON.stringify(updated));
+  }
 
-      if (error) {
-         console.error("Supabase Fetch Error", error);
-         throw new Error(`Failed to fetch from cloud: ${error.message}`);
-      }
+  public renameNoteLocal(id: string, newTopic: string): void {
+    const notes = this.getLocalNotes();
+    const updated = notes.map(n => n.id === id ? { ...n, topic: newTopic } : n);
+    localStorage.setItem('neuro_history', JSON.stringify(updated));
+  }
+
+  /* ========================================================================
+     🔥 SUPABASE CRUD OPERATIONS
+  ======================================================================== */
+
+  public async uploadNoteToCloud(note: HistoryItem): Promise<boolean> {
+    if (!this.isSupabaseReady || !this.supabase) throw new Error("Cloud not connected");
+
+    const { error } = await this.supabase
+      .from('neuro_notes')
+      .upsert({
+        id: note.id,
+        topic: note.topic,
+        content: note.content,
+        mode: note.mode,
+        provider: note.provider,
+        timestamp: note.timestamp,
+        tags: note.tags || [] 
+      });
+
+    if (error) {
+      console.error("Supabase Upload Error:", error);
+      throw new Error(error.message);
+    }
+    return true;
+  }
+
+  public async getCloudNotes(): Promise<HistoryItem[]> {
+    if (!this.isSupabaseReady || !this.supabase) return [];
+
+    const { data, error } = await this.supabase
+      .from('neuro_notes')
+      .select('*')
+      .order('timestamp', { ascending: false });
+
+    if (error) {
+      console.error("Supabase Fetch Error:", error);
+      throw new Error(error.message);
+    }
+
+    return (data || []).map((item: any) => ({
+      id: item.id,
+      topic: item.topic,
+      content: item.content,
+      mode: item.mode,
+      provider: item.provider,
+      timestamp: item.timestamp,
+      parentId: null,
+      tags: item.tags || this.generateTags(item.topic, item.mode, item.content),
+      folderId: null // Cloud notes currently don't sync folders structure in this version
+    }));
+  }
+
+  public async deleteNoteFromCloud(id: string): Promise<void> {
+    if (!this.isSupabaseReady || !this.supabase) return;
+    
+    const { error } = await this.supabase
+      .from('neuro_notes')
+      .delete()
+      .eq('id', id);
+    
+    if (error) {
+        throw new Error(error.message);
+    }
+  }
+
+  public async updateNoteTags(id: string, newTags: string[]): Promise<void> {
+      // 1. Update Local
+      const local = this.getLocalNotes();
+      const targetIdx = local.findIndex(n => n.id === id);
       
-      return (data || []) as HistoryItem[];
-    }
-  }
-
-  public async deleteNote(id: string): Promise<void> {
-    if (this.currentType === StorageType.LOCAL) {
-      const stored = localStorage.getItem('neuro_history');
-      if (stored) {
-        const history: HistoryItem[] = JSON.parse(stored);
-        const updated = history.filter(h => h.id !== id);
-        localStorage.setItem('neuro_history', JSON.stringify(updated));
+      if (targetIdx >= 0) {
+          local[targetIdx].tags = newTags;
+          localStorage.setItem('neuro_history', JSON.stringify(local));
       }
-    } else {
-      if (!this.supabase) throw new Error("Supabase client not initialized");
-      
-      const { error } = await this.supabase
-        .from('neuro_notes')
-        .delete()
-        .eq('id', id);
 
-      if (error) throw error;
-    }
-  }
-
-  public async renameNote(id: string, newTopic: string): Promise<void> {
-    if (this.currentType === StorageType.LOCAL) {
-      const stored = localStorage.getItem('neuro_history');
-      if (stored) {
-        const history: HistoryItem[] = JSON.parse(stored);
-        const updated = history.map(h => h.id === id ? { ...h, topic: newTopic } : h);
-        localStorage.setItem('neuro_history', JSON.stringify(updated));
+      // 2. Update Cloud
+      if (this.isSupabaseReady && this.supabase) {
+          try {
+             await this.supabase.from('neuro_notes').update({ tags: newTags }).eq('id', id);
+          } catch (e) {
+             console.warn("Failed to sync tags to cloud.", e);
+          }
       }
-    } else {
-      if (!this.supabase) throw new Error("Supabase client not initialized");
-      const { error } = await this.supabase
-        .from('neuro_notes')
-        .update({ topic: newTopic })
-        .eq('id', id);
-      if (error) throw error;
-    }
   }
 
-  /* --- SYLLABUS QUEUE METHODS --- */
+  /* ========================================================================
+     UNIFIED DATA MESH
+  ======================================================================== */
+  public async getUnifiedNotes(): Promise<HistoryItem[]> {
+      const local = this.getLocalNotes();
+      const unifiedMap = new Map<string, HistoryItem>();
 
+      local.forEach(note => {
+          unifiedMap.set(note.id, { ...note, _status: 'local' });
+      });
+
+      if (this.isSupabaseReady) {
+          try {
+              const cloud = await this.getCloudNotes();
+              cloud.forEach(cNote => {
+                  if (unifiedMap.has(cNote.id)) {
+                      const existing = unifiedMap.get(cNote.id)!;
+                      const mergedTags = (existing.tags && existing.tags.length > 0) ? existing.tags : (cNote.tags || []);
+                      unifiedMap.set(cNote.id, { 
+                          ...existing, 
+                          tags: mergedTags, 
+                          _status: 'synced' 
+                      });
+                  } else {
+                      unifiedMap.set(cNote.id, { ...cNote, _status: 'cloud' });
+                  }
+              });
+          } catch (e) {
+              console.warn("Could not fetch cloud notes for unification:", e);
+          }
+      }
+
+      return Array.from(unifiedMap.values()).sort((a, b) => b.timestamp - a.timestamp);
+  }
+
+  // ... (Queue methods remain unchanged)
   public async saveQueue(queue: SavedQueue): Promise<void> {
-    // Currently only supporting Local Storage for Queues to keep complexity low for this feature
-    // Can be expanded to Supabase table 'neuro_queues' later
     const stored = localStorage.getItem('neuro_saved_queues');
     const queues: SavedQueue[] = stored ? JSON.parse(stored) : [];
-    
-    // Check if exists, update if so
     const existingIndex = queues.findIndex(q => q.id === queue.id);
-    if (existingIndex >= 0) {
-      queues[existingIndex] = queue;
-    } else {
-      queues.unshift(queue);
-    }
-    
+    if (existingIndex >= 0) queues[existingIndex] = queue;
+    else queues.unshift(queue);
     localStorage.setItem('neuro_saved_queues', JSON.stringify(queues));
   }
 

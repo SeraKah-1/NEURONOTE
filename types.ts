@@ -5,36 +5,28 @@ export enum AIProvider {
 }
 
 export enum AppModel {
-  // --- GEMINI MODELS ---
-  GEMINI_3_PRO = 'gemini-3-pro-preview',
-  GEMINI_3_FLASH = 'gemini-3-flash-preview',
-  GEMINI_2_5_PRO = 'gemini-2.5-pro',
-  GEMINI_2_5_FLASH = 'gemini-2.5-flash',
-  GEMINI_2_5_FLASH_LITE = 'gemini-2.5-flash-lite',
+  // --- GEMINI MODELS (Deep Reasoning & Multimodal) ---
+  GEMINI_3_PRO = 'gemini-3-pro-preview',         // Top Tier Reasoning
+  GEMINI_3_FLASH = 'gemini-3-flash-preview',     // Balanced
+  GEMINI_2_5_PRO = 'gemini-2.5-pro',             // Stable High Intelligence
+  GEMINI_2_5_FLASH = 'gemini-2.5-flash',         // Fast Production
+  GEMINI_2_5_FLASH_LITE = 'gemini-2.5-flash-lite', // Cost Effective
+  GEMINI_1_5_PRO = 'gemini-1.5-pro',             // Legacy High Context
+  GEMINI_1_5_FLASH = 'gemini-1.5-flash',         // Legacy Fast
 
-  // --- GROQ MODELS (Production) ---
-  GROQ_LLAMA_3_3_70B = 'llama-3.3-70b-versatile',
-  GROQ_LLAMA_3_1_8B = 'llama-3.1-8b-instant',
-  GROQ_GPT_OSS_120B = 'openai/gpt-oss-120b',
-  GROQ_GPT_OSS_20B = 'openai/gpt-oss-20b',
-  
-  // --- GROQ MODELS (Preview) ---
-  GROQ_LLAMA_4_MAVERICK = 'meta-llama/llama-4-maverick-17b-128e-instruct',
-  GROQ_LLAMA_4_SCOUT = 'meta-llama/llama-4-scout-17b-16e-instruct',
-  GROQ_QWEN_3_32B = 'qwen/qwen3-32b',
-  GROQ_KIMI_K2 = 'moonshotai/kimi-k2-instruct-0905',
-
-  // --- GROQ SYSTEMS ---
-  GROQ_COMPOUND = 'groq/compound',
-  GROQ_COMPOUND_MINI = 'groq/compound-mini'
+  // --- GROQ MODELS (Extreme Speed LPU) ---
+  GROQ_LLAMA_4_MAVERICK_17B = 'meta-llama/llama-4-maverick-17b-128e-instruct', // CORRECTED SLUG
+  GROQ_LLAMA_3_3_70B = 'llama-3.3-70b-versatile', // Best Open Source Overall
+  GROQ_LLAMA_3_1_8B = 'llama-3.1-8b-instant',     // Fastest
+  GROQ_MIXTRAL_8X7B = 'mixtral-8x7b-32768',       // High Context
+  GROQ_GEMMA2_9B = 'gemma2-9b-it'                 // Google Efficient
 }
 
 export enum NoteMode {
-  GENERAL = 'general',           // Standard Clinical Structure
-  CHEAT_CODES = 'cheat_codes',   // Mnemonics & High Yield Tables
-  FIRST_PRINCIPLES = 'principles', // Mechanistic & Pathophysiological
-  FEYNMAN = 'feynman',           // Analogical & Simplified (Non-conversational)
-  SOCRATIC = 'socratic'          // Inquiry-Based Structure
+  GENERAL = 'general',
+  CHEAT_CODES = 'cheat_codes',
+  FIRST_PRINCIPLES = 'principles',
+  CUSTOM = 'custom'
 }
 
 export enum StorageType {
@@ -44,40 +36,22 @@ export enum StorageType {
 
 export enum AppView {
   WORKSPACE = 'workspace',
+  SETTINGS = 'settings',
+  ARCHIVE = 'archive',
   SYLLABUS = 'syllabus',
-  HISTORY = 'history',
-  SETTINGS = 'settings'
-}
-
-export interface GenerationConfig {
-  provider: AIProvider;
-  model: AppModel;
-  temperature: number;
-  apiKey?: string;     // Gemini Key
-  groqApiKey?: string; // Groq Key
-  mode: NoteMode;
-  storageType: StorageType;
-  supabaseUrl?: string;
-  supabaseKey?: string;
+  GRAPH = 'graph'
 }
 
 export interface UploadedFile {
   name: string;
   mimeType: string;
-  data: string; // Base64 content without prefix
+  data: string; // Base64
 }
 
-export interface NoteData {
-  topic: string;
-  structure: string;
-  files: UploadedFile[];
-}
-
-export interface QuizQuestion {
-  question: string;
-  options: string[];
-  correctIndex: number;
-  explanation: string;
+export interface Folder {
+  id: string;
+  name: string;
+  timestamp: number;
 }
 
 export interface HistoryItem {
@@ -87,7 +61,58 @@ export interface HistoryItem {
   mode: NoteMode;
   content: string;
   provider: AIProvider;
+  parentId?: string | null; // For threading/continuations
+  tags?: string[];
+  _status?: 'local' | 'cloud' | 'synced';
+  folderId?: string | null; 
 }
+
+export interface NoteData {
+  topic: string;
+  files: UploadedFile[];
+  structure: string;
+}
+
+export interface GenerationConfig {
+  provider: AIProvider;
+  model: AppModel | string; // Allow string for flexibility
+  temperature: number;
+  apiKey: string;
+  groqApiKey: string;
+  mode: NoteMode;
+  storageType: StorageType;
+  supabaseUrl: string;
+  supabaseKey: string;
+}
+
+export interface AppState {
+  isLoading: boolean;
+  generatedContent: string | null;
+  error: string | null;
+  progressStep: string;
+  currentView: AppView;
+  activeNoteId: string | null;
+}
+
+export const MODE_STRUCTURES: Record<NoteMode, string> = {
+  [NoteMode.GENERAL]: `# 1. Definition & Core Concept
+# 2. Pathophysiology (Mechanism)
+# 3. Clinical Presentation
+# 4. Diagnostic Workup
+# 5. Management & Treatment
+# 6. Prognosis`,
+  [NoteMode.CHEAT_CODES]: `# 1. High-Yield Facts
+# 2. Mnemonics
+# 3. Must-Know Associations
+# 4. Exam Pitfalls
+# 5. Rapid Tables`,
+  [NoteMode.FIRST_PRINCIPLES]: `# 1. Molecular Origin
+# 2. Cellular Mechanism
+# 3. Tissue/Organ Impact
+# 4. Systemic Manifestation
+# 5. Why the Treatment Works`,
+  [NoteMode.CUSTOM]: `# Custom Structure`
+};
 
 export interface SyllabusItem {
   id: string;
@@ -102,108 +127,30 @@ export interface SavedQueue {
   timestamp: number;
 }
 
-export interface AppState {
-  isLoading: boolean;
-  generatedContent: string | null;
-  error: string | null;
-  progressStep: string;
-  currentView: AppView; // Changed from individual show booleans to a unified view state
+export interface QuizQuestion {
+  question: string;
+  options: string[];
+  correctIndex: number;
+  explanation: string;
 }
 
-export const DEFAULT_STRUCTURE = `1. Definisi & Klasifikasi
-2. Etiologi & Faktor Risiko
-3. Patofisiologi (Mekanisme)
-4. Manifestasi Klinis
-5. Tata Laksana
-6. Komplikasi & Prognosis`;
+export interface NeuroKeyFile {
+  version: string;
+  meta: {
+    issuedTo: string;
+    issuedAt: number;
+    issuer: string;
+  };
+  security: {
+    iv: string;
+    salt: string;
+    data: string;
+  };
+}
 
-export const MODE_STRUCTURES: Record<NoteMode, string> = {
-  [NoteMode.GENERAL]: `## 1. Definisi & Epidemiologi
-## 2. Etiologi & Faktor Risiko
-## 3. Patofisiologi (Mekanisme Utama)
-## 4. Manifestasi Klinis (Tanda & Gejala)
-## 5. Pemeriksaan Penunjang (Labs & Rads)
-## 6. Diagnosis Banding
-## 7. Tata Laksana (Farmako & Non-Farmako)
-## 8. Komplikasi & Prognosis`,
-
-  [NoteMode.CHEAT_CODES]: `## ⚡ High-Yield Triad (Must Know)
-- Definisi cepat & Kata Kunci (Buzzwords) vignette soal.
-- Tanda kardinal utama.
-
-## 🧠 Mnemonics & Memory Hooks
-- Jembatan keledai untuk gejala/kriteria.
-- Asosiasi visual cepat.
-
-## 🚨 Red Flags & Contraindications
-- Hal yang membahayakan nyawa (Life-threatening).
-- Obat/Tindakan yang DILARANG keras.
-
-## 🆚 Rapid Differential Table
-- Tabel perbandingan cepat: Penyakit ini vs Kemiripan terdekat.
-- Fokus pada: Key Distinguishing Feature.
-
-## 💊 Pharmacotherapy Speed-Run
-- Nama Obat | Golongan | Target Mekanisme | Efek Samping Utama.
-- Tanpa dosis detail, fokus pada mekanisme aksi.`,
-
-  [NoteMode.FIRST_PRINCIPLES]: `## 🧬 Molecular Origin (The Root Cause)
-- Apa defek fundamental pada level sel/molekul?
-- Reseptor/Enzim apa yang terganggu?
-
-## ⚙️ Pathophysiological Cascade
-- Runtutan logis dari A -> B -> C (Gunakan Mermaid Flowchart).
-- Jelaskan hukum fisika/biokimia yang berlaku (misal: Hukum Starling, Siklus Krebs).
-
-## ⚖️ Homeostatic Compensation
-- Bagaimana tubuh mencoba menyeimbangkan gangguan ini?
-- Mengapa kompensasi ini akhirnya gagal?
-
-## 🔬 Derivation of Clinical Signs
-- "Mengapa gejala X muncul?" (Diturunkan dari mekanisme, bukan hafalan).
-- Hubungan langsung antara patologi jaringan dengan keluhan pasien.
-
-## 🎯 Mechanism-Based Management
-- Jelaskan MENGAPA obat ini dipilih berdasarkan target molekulernya.
-- Korelasi mekanisme obat dengan pembalikan patofisiologi.`,
-
-  [NoteMode.FEYNMAN]: `## 💡 The "Big Idea"
-- Ringkasan satu kalimat yang menangkap esensi topik ini.
-- "Jika saya harus menjelaskan ini di pesta makan malam..."
-
-## 🍎 The Core Analogy (Real World Mapping)
-- Gunakan analogi dunia nyata (misal: Jantung sebagai pompa air, Ginjal sebagai filter kopi).
-- Petakan komponen medis ke komponen analogi.
-
-## 👶 ELI5: The Narrative Explanation
-- Penjelasan naratif sederhana seolah mengajar pemula.
-- Hindari jargon tanpa penjelasan langsung.
-
-## 🔄 The "But Why?" Chain
-- Pertanyaan berulang untuk menggali kedalaman.
-- Q: Kenapa terjadi X? A: Karena Y. -> Q: Tapi kenapa Y? A: Karena Z.
-
-## 🛑 Common Misconceptions
-- Apa yang sering salah dipahami orang tentang topik ini?
-- Koreksi intuitif.`,
-
-  [NoteMode.SOCRATIC]: `## ❓ Core Question 1: Fundamental Concept
-- Question: Apa hakikat dasar dari kondisi ini?
-- [Hidden Answer]: Definisi konseptual mendalam.
-
-## ❓ Core Question 2: Underlying Mechanism
-- Question: Mekanisme spesifik apa yang memicu kaskade kejadian ini?
-- [Hidden Answer]: Penjelasan patofisiologi kausal.
-
-## ❓ Core Question 3: Diagnostic Logic
-- Question: Data apa yang mutlak diperlukan untuk diagnosis pasti dan mengapa?
-- [Hidden Answer]: Gold standard diagnosis & reasoning.
-
-## ❓ Core Question 4: Therapeutic Justification
-- Question: Mengapa regimen terapi X lebih superior dibanding Y pada kasus ini?
-- [Hidden Answer]: Farmakodinamik dan EBM reasoning.
-
-## 🧪 Clinical Vignette Challenge
-- Studi kasus singkat untuk menguji pemahaman.
-- Solusi dan Pembahasan.`
-};
+export interface EncryptedPayload {
+  geminiKey?: string;
+  groqKey?: string;
+  supabaseUrl?: string;
+  supabaseKey?: string;
+}

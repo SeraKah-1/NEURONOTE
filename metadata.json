@@ -1,5 +1,5 @@
 {
-  "name": "NeuroNote AI",
-  "description": "An advanced medical note generation tool leveraging cognitive design theory to structure complex information into interactive, Obsidian-ready notes.",
+  "name": "NeuroNote",
+  "description": "High-fidelity medical note generator with strict visualization protocols.",
   "requestFramePermissions": []
 }

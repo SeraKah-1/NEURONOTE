@@ -1,3 +1,4 @@
+
 // Helper to clean content and add quotes for Markdown blockquotes
 const cleanAndQuoteContent = (content: string): string => {
   const lines = content.trim().split('\n');
@@ -16,7 +17,8 @@ export const convertTagsToObsidian = (text: string): string => {
     'DEEP': { type: 'note', icon: '👁️' },
     'CLINIC': { type: 'tip', icon: '💊' },
     'ALERT': { type: 'warning', icon: '⚠️' },
-    'INFO': { type: 'info', icon: 'ℹ️' }
+    'INFO': { type: 'info', icon: 'ℹ️' },
+    'TABLE': { type: 'example', icon: '📊' }
   };
 
   let processedText = text;
@@ -39,74 +41,87 @@ export const convertTagsToObsidian = (text: string): string => {
 
 // Function to fix broken Mermaid syntax from AI
 export const fixMermaidSyntax = (markdownText: string): string => {
-  // Regex to find mermaid blocks
   const mermaidBlockPattern = /```mermaid([\s\S]*?)```/g;
 
   return markdownText.replace(mermaidBlockPattern, (match, rawContent) => {
     const lines = rawContent.split('\n');
     const fixedLines: string[] = [];
 
-    for (let line of lines) {
-      line = line.trim();
-      if (!line) continue;
-      if (line.startsWith('%%')) continue;
-      
-      // 0. Fix escaped quotes that sometimes appear (e.g. \"text\") and escaped brackets
-      line = line.replace(/\\"/g, '"');
-      line = line.replace(/\\\[/g, '[').replace(/\\\]/g, ']');
-
-      // 1. Remove garbage prefixes (e.g. "1. A --> B")
-      line = line.replace(/^[\d\.\-\*\s]+(?=\w)/, '');
-
-      // 2. Fix broken arrows and hallucinated arrow endings
-      // Fix -->|Text|> pattern (common AI hallucination)
-      line = line.replace(/-->\s*\|([^|]+)\|>+/g, '-->|$1|');
-      // Fix --|Text|--> (sometimes appears)
-      line = line.replace(/--\|([^|]+)\|-->/g, '-->|$1|');
-      
-      // Standardize arrows
-      line = line.replace(/--\s+>/g, '-->');
-      line = line.replace(/-\s+>/g, '->');
-      line = line.replace(/\s+-->/g, ' -->'); 
-      line = line.replace(/-->\s+/g, '--> ');
-      
-      // Fix generic |> garbage at end of arrows if not class diagram inheritance
-      if (!line.includes('<|')) { 
-         line = line.replace(/\|>/g, '|'); 
-      }
-
-      // 3. Node Label Sanitization
-      // Helper to quote content if not quoted
-      const ensureQuoted = (id: string, content: string, wrapper: [string, string]) => {
-         // If already quoted properly, return as is
-         if (/^".*"$/.test(content)) return `${id}${wrapper[0]}${content}${wrapper[1]}`;
-         
-         // Escape internal quotes
-         const safe = content.replace(/"/g, "'");
-         return `${id}${wrapper[0]}"${safe}"${wrapper[1]}`;
-      };
-
-      // Process [ ... ]
-      line = line.replace(/([\w-]+)\s*\[(.*?)\]/g, (m, id, c) => ensureQuoted(id, c, ['[', ']']));
-      
-      // Process ( ... )
-      line = line.replace(/([\w-]+)\s*\((.*?)\)/g, (m, id, c) => ensureQuoted(id, c, ['(', ')']));
-      
-      // Process { ... }
-      line = line.replace(/([\w-]+)\s*\{(.*?)\}/g, (m, id, c) => ensureQuoted(id, c, ['{', '}']));
-      
-      // Fix double quotes issues if any (e.g. ""text"")
-      line = line.replace(/""/g, '"');
-
-      fixedLines.push(line);
+    // Ensure graph declaration exists if missing
+    const hasDecl = lines.some((l) => /^(graph|flowchart|sequenceDiagram|classDiagram|stateDiagram|erDiagram|gantt|pie|mindmap)/i.test(l.trim()));
+    if (!hasDecl) {
+      fixedLines.push('graph TD');
     }
 
-    if (fixedLines.length > 0) {
-      const firstLine = fixedLines[0];
-      const isGraphDecl = /^(graph|flowchart|sequenceDiagram|classDiagram|stateDiagram|erDiagram|gantt|pie)/.test(firstLine);
-      if (!isGraphDecl) {
-        fixedLines.unshift('graph TD');
+    for (let line of lines) {
+      line = line.trim();
+      if (!line || line.startsWith('%%')) continue;
+      
+      // 1. Remove generic list numbers often hallucinated by AI (e.g. "1. A --> B")
+      line = line.replace(/^[\d\.\-\*\s]+(?=\w)/, '');
+
+      // 2. Fix Broken/Malformed Arrows
+      line = line.replace(/\s*-->\s*/g, ' --> ');
+      line = line.replace(/\s*->\s*/g, ' -> ');
+      line = line.replace(/\s*-\.->\s*/g, ' -.-> ');
+      line = line.replace(/\s*==>\s*/g, ' ==> ');
+      line = line.replace(/--\|/g, '|'); // Fix --|Text|
+      line = line.replace(/\|-->/g, '| -->');
+      
+      // 3. SANITIZATION HELPER
+      // Aggressively cleans text to be safe inside a double-quoted string
+      const sanitize = (text: string) => {
+        // Remove outer quotes if present to avoid double quoting
+        let clean = text.replace(/^["']|["']$/g, '');
+        // Escape internal quotes
+        clean = clean.replace(/"/g, "'");
+        // Replace brackets/parens that break mermaid parser if they appear inside labels
+        // We replace them with space to preserve readability without breaking syntax
+        clean = clean.replace(/[\[\]\(\)\{\}]/g, ' '); 
+        return `"${clean.trim()}"`;
+      };
+
+      // 4. NODE PATTERN MATCHING & REPLACEMENT
+      // Convert any node shape (round, square, curly, stadium) to a standard sanitized format.
+      // Use lazy matching (.+?) to handle multiple nodes on one line (e.g., A[x] --> B[y])
+
+      // Fix Round Brackets: ID(...) or ID([...]) (Stadium treated as Round for safety)
+      line = line.replace(/(\b\w+)\s*\((.+?)\)/g, (m, id, content) => {
+          return `${id}(${sanitize(content)})`; 
+      });
+
+      // Fix Square Brackets: ID[...]
+      line = line.replace(/(\b\w+)\s*\[(.+?)\]/g, (m, id, content) => {
+          return `${id}[${sanitize(content)}]`;
+      });
+
+      // Fix Curly Brackets: ID{...}
+      line = line.replace(/(\b\w+)\s*\{(.+?)\}/g, (m, id, content) => {
+          return `${id}{${sanitize(content)}}`;
+      });
+
+      // 5. INJECT MISSING ARROWS
+      // Detects adjacent nodes missing an arrow, e.g., "A[Label] B[Label]"
+      // Pattern: Closing bracket/paren -> whitespace -> Start of next node ID
+      line = line.replace(/([\)|\]|\}])\s+(?=[a-zA-Z0-9_]+[\(\[\{])/g, '$1 --> ');
+
+      // 6. CLEANUP & VALIDATION
+      // Fix double quotes
+      line = line.replace(/""/g, '"');
+      
+      // Remove trailing garbage parens/brackets that might remain from bad regex matches
+      line = line.replace(/(")\s*[\)\]\}]+$/g, '$1');
+
+      // Filter out lines that are purely text (hallucinations) and not valid graph syntax
+      // Must contain an arrow, or be a node definition, or a keyword
+      const validSyntax = /(-->|->|==>|-\.->|subgraph|end|classDef|click|style|graph|flowchart|sequenceDiagram|classDiagram|stateDiagram|erDiagram|gantt|pie|mindmap|\[|\(|\{)/;
+      
+      if (!validSyntax.test(line)) {
+           // Comment out invalid lines instead of deleting, to preserve context if needed
+           line = `%% Ignored text: ${line}`;
       }
+
+      fixedLines.push(line);
     }
 
     return "```mermaid\n" + fixedLines.join('\n') + "\n```";
