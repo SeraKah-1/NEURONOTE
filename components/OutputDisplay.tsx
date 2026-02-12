@@ -2,7 +2,7 @@
 import React, { useState, useEffect, useRef, useMemo, useCallback } from 'react';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
-import { Download, Copy, Eye, Check, List, Book, Focus, Save, Edit3, CloudUpload, Clipboard, ClipboardCheck, EyeOff, MousePointerClick, BookOpen, Microscope, Activity, AlertTriangle, Info, Wand2, Workflow } from 'lucide-react';
+import { Download, Copy, Eye, Check, List, Book, Focus, Save, Edit3, CloudUpload, Clipboard, ClipboardCheck, EyeOff, MousePointerClick, BookOpen, Microscope, Activity, AlertTriangle, Info, Wand2, Search, X } from 'lucide-react';
 import { StorageService } from '../services/storageService';
 import { processGeneratedNote } from '../utils/formatter';
 import Mermaid from './Mermaid';
@@ -49,6 +49,43 @@ const SensorBlock: React.FC<{ children: React.ReactNode; active: boolean }> = Re
   );
 });
 
+// --- SEARCH HIGHLIGHTER HELPER ---
+const HighlightText: React.FC<{ text: string; query: string }> = ({ text, query }) => {
+  if (!query) return <>{text}</>;
+  
+  const parts = text.split(new RegExp(`(${query})`, 'gi'));
+  return (
+    <>
+      {parts.map((part, i) => 
+        part.toLowerCase() === query.toLowerCase() ? (
+          <span key={i} className="bg-yellow-500/80 text-white rounded px-0.5 box-decoration-clone">{part}</span>
+        ) : (
+          part
+        )
+      )}
+    </>
+  );
+};
+
+// Recursive helper to walk through React Children and highlight strings
+const recursiveHighlight = (children: React.ReactNode, query: string): React.ReactNode => {
+    if (!query) return children;
+
+    return React.Children.map(children, child => {
+        if (typeof child === 'string') {
+            return <HighlightText text={child} query={query} />;
+        }
+        if (React.isValidElement(child)) {
+             // If it's a React Element, recurse into its children
+             return React.cloneElement(child as React.ReactElement<any>, {
+                 children: recursiveHighlight(child.props.children, query)
+             });
+        }
+        return child;
+    });
+};
+
+
 const OutputDisplay: React.FC<OutputDisplayProps> = ({ content, topic, onUpdateContent, onManualSave, noteId }) => {
   const [editableContent, setEditableContent] = useState(content);
   const [isDirty, setIsDirty] = useState(false);
@@ -62,10 +99,35 @@ const OutputDisplay: React.FC<OutputDisplayProps> = ({ content, topic, onUpdateC
   const scrollRef = useRef<HTMLDivElement>(null);
   const [sensorMode, setSensorMode] = useState(false);
 
+  // SEARCH STATE
+  const [showSearch, setShowSearch] = useState(false);
+  const [searchQuery, setSearchQuery] = useState('');
+  const searchInputRef = useRef<HTMLInputElement>(null);
+
   useEffect(() => {
     setEditableContent(content);
     setIsDirty(false); 
   }, [content]);
+
+  // CTRL+F LISTENER
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+        if ((e.ctrlKey || e.metaKey) && e.key === 'f') {
+            e.preventDefault();
+            if (activeTab === 'preview') {
+                setShowSearch(true);
+                setTimeout(() => searchInputRef.current?.focus(), 50);
+            }
+        }
+        // ESC to close search
+        if (e.key === 'Escape' && showSearch) {
+             setShowSearch(false);
+             setSearchQuery('');
+        }
+    };
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [activeTab, showSearch]);
 
   // MEMOIZED TOC GENERATION
   const toc = useMemo(() => {
@@ -170,7 +232,7 @@ const OutputDisplay: React.FC<OutputDisplayProps> = ({ content, topic, onUpdateC
     }
   };
 
-  // --- CUSTOM MARKDOWN RENDERERS ---
+  // --- CUSTOM MARKDOWN RENDERERS (Memoized with Search Query) ---
 
   const CodeBlock = useCallback(({ node, className, children, ...props }: any) => {
     const [isCopied, setIsCopied] = useState(false);
@@ -184,17 +246,15 @@ const OutputDisplay: React.FC<OutputDisplayProps> = ({ content, topic, onUpdateC
         setTimeout(() => setIsCopied(false), 2000);
     };
 
-    // --- MERMAID RENDERER ---
     if (isMermaid) {
         return (
           <SensorBlock active={sensorMode}>
-             {/* Renders the diagram visually */}
              <Mermaid chart={content} />
           </SensorBlock>
         );
     }
 
-    if (!match) return <code className="bg-gray-800 px-1 py-0.5 rounded text-neuro-accent font-mono text-sm" {...props}>{children}</code>;
+    if (!match) return <code className="bg-gray-800 px-1 py-0.5 rounded text-neuro-accent font-mono text-sm" {...props}>{recursiveHighlight(children, searchQuery)}</code>;
 
     return (
         <SensorBlock active={sensorMode}>
@@ -206,12 +266,14 @@ const OutputDisplay: React.FC<OutputDisplayProps> = ({ content, topic, onUpdateC
                   </button>
               </div>
               <div className="p-4 overflow-x-auto custom-scrollbar">
-                  <code className={`${className} text-sm`} {...props}>{children}</code>
+                  <code className={`${className} text-sm`} {...props}>
+                      {children} {/* Code blocks usually don't need text search highlight inside syntax, but we can try if simple text */}
+                  </code>
               </div>
           </div>
         </SensorBlock>
     );
-  }, [sensorMode]);
+  }, [sensorMode, searchQuery]);
 
   const getHeaderId = useCallback((text: string, level: number) => {
     const found = toc.find(t => t.text === text && t.level === level);
@@ -253,9 +315,11 @@ const OutputDisplay: React.FC<OutputDisplayProps> = ({ content, topic, onUpdateC
                                                 }
                                                 return gc;
                                             });
-                                            return React.cloneElement(child, { children: filteredGrandChildren });
+                                            // Recurse highlight
+                                            const activeContent = recursiveHighlight(filteredGrandChildren, searchQuery);
+                                            return React.cloneElement(child, { children: activeContent });
                                        }
-                                       return child;
+                                       return React.cloneElement(child, { children: recursiveHighlight(child.props.children, searchQuery) });
                                    })}
                                </div>
                            </div>
@@ -265,22 +329,48 @@ const OutputDisplay: React.FC<OutputDisplayProps> = ({ content, topic, onUpdateC
            }
        }
     }
-    return <SensorBlock active={sensorMode}><blockquote>{children}</blockquote></SensorBlock>;
-  }, [sensorMode]);
+    return <SensorBlock active={sensorMode}><blockquote>{recursiveHighlight(children, searchQuery)}</blockquote></SensorBlock>;
+  }, [sensorMode, searchQuery]);
 
   const components = useMemo(() => ({
-    h1: ({ children }: any) => <h1 id={getHeaderId(String(children), 1)}>{children}</h1>,
-    h2: ({ children }: any) => <h2 id={getHeaderId(String(children), 2)}>{children}</h2>,
-    h3: ({ children }: any) => <h3 id={getHeaderId(String(children), 3)}>{children}</h3>,
-    p: ({ children }: any) => <SensorBlock active={sensorMode}><p>{children}</p></SensorBlock>,
-    li: ({ children }: any) => <SensorBlock active={sensorMode}><li>{children}</li></SensorBlock>,
-    table: ({ children }: any) => <SensorBlock active={sensorMode}><table>{children}</table></SensorBlock>,
+    h1: ({ children }: any) => <h1 id={getHeaderId(String(children), 1)}>{recursiveHighlight(children, searchQuery)}</h1>,
+    h2: ({ children }: any) => <h2 id={getHeaderId(String(children), 2)}>{recursiveHighlight(children, searchQuery)}</h2>,
+    h3: ({ children }: any) => <h3 id={getHeaderId(String(children), 3)}>{recursiveHighlight(children, searchQuery)}</h3>,
+    p: ({ children }: any) => <SensorBlock active={sensorMode}><p>{recursiveHighlight(children, searchQuery)}</p></SensorBlock>,
+    li: ({ children }: any) => <SensorBlock active={sensorMode}><li>{recursiveHighlight(children, searchQuery)}</li></SensorBlock>,
+    table: ({ children }: any) => <SensorBlock active={sensorMode}><table>{recursiveHighlight(children, searchQuery)}</table></SensorBlock>,
     blockquote: BlockquoteRenderer,
     code: CodeBlock
-  }), [getHeaderId, CodeBlock, BlockquoteRenderer, sensorMode]);
+  }), [getHeaderId, CodeBlock, BlockquoteRenderer, sensorMode, searchQuery]);
 
   return (
-    <div className="flex h-[800px] gap-4">
+    <div className="flex h-[800px] gap-4 relative group/display">
+      
+      {/* Search Overlay */}
+      {showSearch && activeTab === 'preview' && (
+         <div className="absolute top-16 right-6 z-50 animate-slide-up">
+            <div className="bg-[#0f172a] border border-neuro-primary shadow-2xl rounded-lg p-2 flex items-center gap-2 w-72">
+               <Search size={14} className="text-neuro-primary ml-1"/>
+               <input 
+                  ref={searchInputRef}
+                  type="text" 
+                  value={searchQuery}
+                  onChange={(e) => setSearchQuery(e.target.value)}
+                  placeholder="Find in note..."
+                  className="flex-1 bg-transparent text-sm text-white outline-none placeholder:text-gray-600"
+               />
+               <button onClick={() => { setSearchQuery(''); setShowSearch(false); }} className="text-gray-500 hover:text-white p-1">
+                  <X size={14}/>
+               </button>
+            </div>
+            {searchQuery && (
+               <div className="text-[9px] text-gray-500 font-mono text-right mt-1 bg-black/50 inline-block px-1 rounded">
+                  Use highlighting to find matches
+               </div>
+            )}
+         </div>
+      )}
+
       {/* TOC */}
       {showToc && activeTab === 'preview' && toc.length > 0 && (
         <div className="w-64 bg-neuro-surface border border-gray-800 rounded-xl flex flex-col overflow-hidden shrink-0 hidden md:flex animate-fade-in">
@@ -323,6 +413,17 @@ const OutputDisplay: React.FC<OutputDisplayProps> = ({ content, topic, onUpdateC
 
           <div className="flex items-center space-x-2">
             
+            {/* Search Button */}
+            {activeTab === 'preview' && (
+                <button 
+                  onClick={() => { setShowSearch(!showSearch); if(!showSearch) setTimeout(() => searchInputRef.current?.focus(), 50); }}
+                  className={`p-2 rounded-md transition-colors border ${showSearch ? 'bg-neuro-primary text-white border-neuro-primary' : 'bg-gray-800 border-gray-700 text-gray-400'}`}
+                  title="Search (Ctrl+F)"
+                >
+                    <Search size={16}/>
+                </button>
+            )}
+
             {/* FIX SYNTAX BUTTON */}
             <button 
                 onClick={handleFixSyntax}

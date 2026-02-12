@@ -1,3 +1,4 @@
+
 import React, { useState, useEffect } from 'react';
 import { HistoryItem, NoteMode } from '../types';
 import { StorageService } from '../services/storageService';
@@ -80,7 +81,6 @@ const NeuralVault: React.FC<NeuralVaultProps> = ({ onSelectNote, onImportCloud }
   const getModeIcon = (mode: NoteMode) => {
     switch (mode) {
       case NoteMode.CHEAT_CODES: return <Zap size={14} className="text-amber-400" />;
-      case NoteMode.FIRST_PRINCIPLES: return <Microscope size={14} className="text-cyan-400" />;
       case NoteMode.CUSTOM: return <PenTool size={14} className="text-pink-400" />;
       default: return <GraduationCap size={14} className="text-neuro-primary" />;
     }

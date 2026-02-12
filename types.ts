@@ -15,7 +15,7 @@ export enum AppModel {
   GEMINI_1_5_FLASH = 'gemini-1.5-flash',         // Legacy Fast
 
   // --- GROQ MODELS (Extreme Speed LPU) ---
-  GROQ_LLAMA_4_MAVERICK_17B = 'meta-llama/llama-4-maverick-17b-128e-instruct', // CORRECTED SLUG
+  GROQ_LLAMA_4_MAVERICK_17B = 'meta-llama/llama-4-maverick-17b-128e-instruct', 
   GROQ_LLAMA_3_3_70B = 'llama-3.3-70b-versatile', // Best Open Source Overall
   GROQ_LLAMA_3_1_8B = 'llama-3.1-8b-instant',     // Fastest
   GROQ_MIXTRAL_8X7B = 'mixtral-8x7b-32768',       // High Context
@@ -23,11 +23,9 @@ export enum AppModel {
 }
 
 export enum NoteMode {
-  GENERAL = 'general',
-  CHEAT_CODES = 'cheat_codes',
-  FIRST_PRINCIPLES = 'principles',
-  VISUALIZER = 'visualizer', // NEW MODE
-  CUSTOM = 'custom'
+  GENERAL = 'general',      // STANDARD
+  CHEAT_CODES = 'cheat_codes', // CHEAT SHEET
+  CUSTOM = 'custom'         // CUSTOM
 }
 
 export enum StorageType {
@@ -53,6 +51,12 @@ export interface Folder {
   id: string;
   name: string;
   timestamp: number;
+}
+
+export interface SavedPrompt {
+  id: string;
+  name: string;
+  content: string;
 }
 
 export interface HistoryItem {
@@ -103,27 +107,15 @@ export interface AppState {
 }
 
 export const MODE_STRUCTURES: Record<NoteMode, string> = {
-  [NoteMode.GENERAL]: `# 1. Definition & Core Concept
-# 2. Pathophysiology (Mechanism)
-# 3. Clinical Presentation
-# 4. Diagnostic Workup
-# 5. Management & Treatment
-# 6. Prognosis`,
-  [NoteMode.CHEAT_CODES]: `# 1. High-Yield Facts
-# 2. Mnemonics
-# 3. Must-Know Associations
-# 4. Exam Pitfalls
-# 5. Rapid Tables`,
-  [NoteMode.FIRST_PRINCIPLES]: `# 1. Molecular Origin
-# 2. Cellular Mechanism
-# 3. Tissue/Organ Impact
-# 4. Systemic Manifestation
-# 5. Why the Treatment Works`,
-  [NoteMode.VISUALIZER]: `# 1. Concept Map (Mindmap)
-# 2. Process Flow (Flowchart)
-# 3. Structural Relations (Graph)
-# 4. Timeline / Sequence
-# 5. Visual Summary`,
+  [NoteMode.GENERAL]: `# 1. KENAPA PENTING? (Clinical Relevance & Urgency)
+# 2. BIG PICTURE (Definisi & Tujuan Utama)
+# 3. KOMPONEN & MEKANISME (Bagaimana Cara Kerjanya?)
+# 4. GEJALA KLINIS (Dampak Jika Rusak)
+# 5. MANAJEMEN KILAT (Solusi)`,
+  [NoteMode.CHEAT_CODES]: `# 1. HIGH YIELD FACTS (Sering Keluar Ujian)
+# 2. MNEMONICS (Jembatan Keledai)
+# 3. TABEL PERBANDINGAN
+# 4. JEBAKAN SOAL`,
   [NoteMode.CUSTOM]: `# Custom Structure`
 };
 

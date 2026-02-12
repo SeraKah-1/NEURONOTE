@@ -35,19 +35,29 @@ const fixMermaidArrows = (line: string): string => {
 
 const sanitizeNodeLabels = (line: string): string => {
   // Regex to find: ID + Bracket + Content + CloseBracket
+  // Captures: 1=ID, 2=OpenBracket, 3=Content, 4=CloseBracket
   const nodeRegex = /([a-zA-Z0-9_]+)\s*([\[\(\{\>]+)(.*?)([\]\)\}\>]+)/g;
 
-  if (line.trim().startsWith('style') || line.trim().startsWith('classDef') || line.trim().startsWith('subgraph')) {
+  if (line.trim().startsWith('style') || line.trim().startsWith('classDef') || line.trim().startsWith('subgraph') || line.trim().startsWith('click')) {
     return line;
   }
 
   return line.replace(nodeRegex, (match, id, open, content, close) => {
-    let cleanContent = content.trim();
-    if (cleanContent.startsWith('"') && cleanContent.endsWith('"')) {
-      cleanContent = cleanContent.slice(1, -1);
+    let rawContent = content.trim();
+    
+    // STRIP & RE-WRAP LOGIC
+    // 1. Remove existing outer quotes if they exist (both " and ')
+    if ((rawContent.startsWith('"') && rawContent.endsWith('"')) || 
+        (rawContent.startsWith("'") && rawContent.endsWith("'"))) {
+      rawContent = rawContent.slice(1, -1);
     }
-    cleanContent = cleanContent.replace(/"/g, "'");
-    return `${id}${open}"${cleanContent}"${close}`;
+
+    // 2. Sanitize internal quotes: Convert ALL double quotes inside to single quotes
+    // This prevents "Text with "Quote"" from breaking the new wrapper
+    const safeContent = rawContent.replace(/"/g, "'");
+
+    // 3. Re-wrap strictly with double quotes (Mermaid standard)
+    return `${id}${open}"${safeContent}"${close}`;
   });
 };
 
@@ -105,8 +115,6 @@ const fixMindmap = (content: string): string => {
     text = text.replace(/\*\*/g, '');
     // Remove trailing colons
     text = text.replace(/:$/, '');
-    // Escape quotes if needed (Mindmaps usually just take text, but parens can trigger shapes)
-    // text = text.replace(/[\(\)]/g, ''); // Aggressive? Maybe just balance check?
     
     return indent + text;
   });

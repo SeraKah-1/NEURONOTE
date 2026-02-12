@@ -1,6 +1,5 @@
-
 import { createClient, SupabaseClient } from '@supabase/supabase-js';
-import { HistoryItem, SavedQueue, NoteMode, Folder } from '../types';
+import { HistoryItem, SavedQueue, NoteMode, Folder, SavedPrompt } from '../types';
 
 export class StorageService {
   private static instance: StorageService;
@@ -44,33 +43,43 @@ export class StorageService {
   }
 
   /* ========================================================================
-     AUTO-TAGGING HEURISTICS
+     AUTO-TAGGING HEURISTICS & PARSING
   ======================================================================== */
   private generateTags(topic: string, mode: NoteMode, content: string = ''): string[] {
     const tags = new Set<string>();
     const lowerTopic = topic.toLowerCase();
 
-    // 1. EXTRACT HASHTAGS FROM CONTENT (User Defined)
-    // Regex matches #tagname (alphanumeric, underscores, hyphens)
+    // 1. EXTRACT EXPLICIT TAGS FROM CONTENT FOOTER (The "Tags: #A #B" line)
+    const footerTagRegex = /(?:Tags|Keywords):\s*((?:#[\w-]+\s*)+)/i;
+    const footerMatch = content.match(footerTagRegex);
+    if (footerMatch) {
+      const tagString = footerMatch[1];
+      const explicitTags = tagString.split(/\s+/).map(t => t.replace('#', '').trim()).filter(t => t.length > 0);
+      explicitTags.forEach(t => tags.add(t));
+    }
+
+    // 2. EXTRACT INLINE HASHTAGS (User Defined inside text)
     const hashtagRegex = /#([\w-]+)/g;
     let match;
     while ((match = hashtagRegex.exec(content)) !== null) {
-      tags.add(match[1]); // Add the tag without the '#'
+      tags.add(match[1]); 
     }
 
-    // 2. Mode Tags (System)
+    // 3. Mode Tags (System)
     if (mode === NoteMode.CHEAT_CODES) tags.add('Exam-Prep');
-    if (mode === NoteMode.FIRST_PRINCIPLES) tags.add('Mechanism');
+    if (mode === NoteMode.GENERAL) tags.add('Standard');
     
-    // 3. System Heuristics (Fallback)
-    if (lowerTopic.match(/heart|cardio|acs|mi|stemi|hypertens/)) tags.add('Cardiology');
-    if (lowerTopic.match(/lung|pneumo|asthma|copd|resp/)) tags.add('Pulmonology');
-    if (lowerTopic.match(/brain|neuro|stroke|seizure|head/)) tags.add('Neurology');
-    if (lowerTopic.match(/kidney|renal|nephro|uti/)) tags.add('Nephrology');
-    if (lowerTopic.match(/liver|hepato|gastro|stomach|bowel/)) tags.add('Gastroenterology');
-    if (lowerTopic.match(/hormone|diabet|thyroid|endo/)) tags.add('Endocrinology');
-    if (lowerTopic.match(/drug|pharma|dose|medic/)) tags.add('Pharmacology');
-    if (lowerTopic.match(/trauma|emerg|shock|arrest/)) tags.add('Emergency');
+    // 4. System Heuristics (Fallback if AI fails to tag)
+    if (tags.size === 0) {
+        if (lowerTopic.match(/heart|cardio|acs|mi|stemi|hypertens|ecg/)) tags.add('Cardiology');
+        if (lowerTopic.match(/lung|pneumo|asthma|copd|resp|tb/)) tags.add('Pulmonology');
+        if (lowerTopic.match(/brain|neuro|stroke|seizure|head|cns/)) tags.add('Neurology');
+        if (lowerTopic.match(/kidney|renal|nephro|uti|aki/)) tags.add('Nephrology');
+        if (lowerTopic.match(/liver|hepato|gastro|stomach|bowel|gerd/)) tags.add('Gastroenterology');
+        if (lowerTopic.match(/hormone|diabet|thyroid|endo|insulin/)) tags.add('Endocrinology');
+        if (lowerTopic.match(/drug|pharma|dose|medic|antibiotic/)) tags.add('Pharmacology');
+        if (lowerTopic.match(/trauma|emerg|shock|arrest|als/)) tags.add('Emergency');
+    }
     
     return Array.from(tags);
   }
@@ -113,24 +122,41 @@ export class StorageService {
   }
 
   /* ========================================================================
+     PROMPT TEMPLATES (STRUCTURES)
+  ======================================================================== */
+  public saveTemplate(template: SavedPrompt): void {
+      const templates = this.getTemplates();
+      const idx = templates.findIndex(t => t.id === template.id);
+      if (idx >= 0) templates[idx] = template;
+      else templates.push(template);
+      localStorage.setItem('neuro_templates', JSON.stringify(templates));
+  }
+
+  public getTemplates(): SavedPrompt[] {
+      try {
+          const stored = localStorage.getItem('neuro_templates');
+          return stored ? JSON.parse(stored) : [];
+      } catch { return []; }
+  }
+
+  public deleteTemplate(id: string): void {
+      const templates = this.getTemplates().filter(t => t.id !== id);
+      localStorage.setItem('neuro_templates', JSON.stringify(templates));
+  }
+
+  /* ========================================================================
      LOCAL STORAGE SYSTEM
   ======================================================================== */
 
   public saveNoteLocal(note: HistoryItem): void {
     const notes = this.getLocalNotes();
     
-    // INTELLIGENT TAGGING:
-    // Extract tags from content (hashtags) + System heuristics
-    // Merge with existing tags if any
     const detectedTags = this.generateTags(note.topic, note.mode, note.content);
-    
-    // Merge existing tags, detected tags, and preserve existing folderId if not specified
     const manualTags = note.tags || [];
     const mergedTags = Array.from(new Set([...manualTags, ...detectedTags]));
 
     note.tags = mergedTags;
 
-    // Preserve folderId if it exists in storage and isn't provided in the update
     const existingIdx = notes.findIndex(n => n.id === note.id);
     if (existingIdx >= 0) {
       if (note.folderId === undefined) {
@@ -143,7 +169,6 @@ export class StorageService {
     localStorage.setItem('neuro_history', JSON.stringify(notes));
   }
 
-  // --- CONNECT TWO NOTES ---
   public connectNotes(sourceId: string, targetId: string): void {
     const notes = this.getLocalNotes();
     const sourceIdx = notes.findIndex(n => n.id === sourceId);
@@ -154,20 +179,15 @@ export class StorageService {
     const source = notes[sourceIdx];
     const target = notes[targetIdx];
 
-    // Strategy: Add the TOPIC of the other note as a tag to create a link.
-    // Clean topic to be tag-safe (no spaces)
     const sourceTag = source.topic.replace(/\s+/g, '-');
     const targetTag = target.topic.replace(/\s+/g, '-');
 
-    // Add target's tag to source
     if (!source.tags) source.tags = [];
     if (!source.tags.includes(targetTag)) source.tags.push(targetTag);
 
-    // Add source's tag to target (Bi-directional)
     if (!target.tags) target.tags = [];
     if (!target.tags.includes(sourceTag)) target.tags.push(sourceTag);
 
-    // Save
     notes[sourceIdx] = source;
     notes[targetIdx] = target;
     localStorage.setItem('neuro_history', JSON.stringify(notes));
@@ -240,7 +260,7 @@ export class StorageService {
       timestamp: item.timestamp,
       parentId: null,
       tags: item.tags || this.generateTags(item.topic, item.mode, item.content),
-      folderId: null // Cloud notes currently don't sync folders structure in this version
+      folderId: null
     }));
   }
 
@@ -258,7 +278,6 @@ export class StorageService {
   }
 
   public async updateNoteTags(id: string, newTags: string[]): Promise<void> {
-      // 1. Update Local
       const local = this.getLocalNotes();
       const targetIdx = local.findIndex(n => n.id === id);
       
@@ -267,7 +286,6 @@ export class StorageService {
           localStorage.setItem('neuro_history', JSON.stringify(local));
       }
 
-      // 2. Update Cloud
       if (this.isSupabaseReady && this.supabase) {
           try {
              await this.supabase.from('neuro_notes').update({ tags: newTags }).eq('id', id);
@@ -312,7 +330,7 @@ export class StorageService {
       return Array.from(unifiedMap.values()).sort((a, b) => b.timestamp - a.timestamp);
   }
 
-  // ... (Queue methods remain unchanged)
+  // ... (Queue methods)
   public async saveQueue(queue: SavedQueue): Promise<void> {
     const stored = localStorage.getItem('neuro_saved_queues');
     const queues: SavedQueue[] = stored ? JSON.parse(stored) : [];

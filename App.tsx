@@ -1,7 +1,7 @@
 
 import React, { useState, useEffect, Suspense } from 'react';
-import { BrainCircuit, Settings2, Sparkles, BookOpen, Layers, Zap, AlertCircle, X, Key, GraduationCap, Microscope, Puzzle, Database, HardDrive, Cloud, Layout, Activity, FlaskConical, ListChecks, Bell, HelpCircle, Copy, Check, ShieldCheck, Cpu, Unlock, Download, RefreshCw, User, Lock, Server, PenTool, Wand2, ChevronRight, FileText, FolderOpen, Trash2, CheckCircle2, Circle, Command, Bot, Maximize2, Home, Projector, Minimize2 } from 'lucide-react';
-import { AppModel, AppState, NoteData, GenerationConfig, MODE_STRUCTURES, NoteMode, HistoryItem, AIProvider, StorageType, AppView, EncryptedPayload } from './types';
+import { BrainCircuit, Settings2, Sparkles, BookOpen, Layers, Zap, AlertCircle, X, Key, GraduationCap, Microscope, Puzzle, Database, HardDrive, Cloud, Layout, Activity, FlaskConical, ListChecks, Bell, HelpCircle, Copy, Check, ShieldCheck, Cpu, Unlock, Download, RefreshCw, User, Lock, Server, PenTool, Wand2, ChevronRight, FileText, FolderOpen, Trash2, CheckCircle2, Circle, Command, Bot, Maximize2, Home, Projector, Minimize2, Component, Save, BookTemplate, ChevronDown, ChevronUp, MessageSquarePlus } from 'lucide-react';
+import { AppModel, AppState, NoteData, GenerationConfig, MODE_STRUCTURES, NoteMode, HistoryItem, AIProvider, StorageType, AppView, EncryptedPayload, SavedPrompt } from './types';
 import { generateNoteContent, generateDetailedStructure } from './services/geminiService';
 import { generateNoteContentGroq, getAvailableGroqModels, generateDetailedStructureGroq } from './services/groqService';
 import { StorageService } from './services/storageService';
@@ -66,6 +66,8 @@ const App: React.FC = () => {
   // UX State
   const [showPalette, setShowPalette] = useState(false);
   const [focusMode, setFocusMode] = useState(false);
+  const [showTemplates, setShowTemplates] = useState(false);
+  const [showCustomPrompt, setShowCustomPrompt] = useState(false); // NEW: Custom Prompt Toggle
   
   // State
   const [config, setConfig] = useState<GenerationConfig>({
@@ -78,7 +80,8 @@ const App: React.FC = () => {
     storageType: StorageType.LOCAL,
     supabaseUrl: '',
     supabaseKey: '',
-    autoApprove: true 
+    autoApprove: true,
+    customContentPrompt: '' // Bind to this
   });
 
   const [noteData, setNoteData] = useState<NoteData>({
@@ -103,6 +106,9 @@ const App: React.FC = () => {
   const [notificationService] = useState(NotificationService.getInstance());
   const [sqlCopied, setSqlCopied] = useState(false);
   const [showAdminModal, setShowAdminModal] = useState(false);
+  
+  // Templates State
+  const [savedTemplates, setSavedTemplates] = useState<SavedPrompt[]>([]);
 
   // --- SHORTCUTS LISTENER ---
   useEffect(() => {
@@ -141,11 +147,12 @@ const App: React.FC = () => {
     notificationService.requestPermissionManual();
   };
 
-  // Init Storage
+  // Init Storage & Load Templates
   useEffect(() => {
     if (config.supabaseUrl && config.supabaseKey) {
       storageService.initSupabase(config.supabaseUrl, config.supabaseKey);
     }
+    setSavedTemplates(storageService.getTemplates());
   }, [config.supabaseUrl, config.supabaseKey, storageService]);
 
   // Fetch Groq Models
@@ -168,6 +175,35 @@ const App: React.FC = () => {
     };
     fetchModels();
   }, [config.provider, config.groqApiKey]);
+
+  // --- TEMPLATE HANDLERS ---
+  const handleSaveTemplate = () => {
+    const name = prompt("Enter a name for this structure template:");
+    if (name) {
+      const t: SavedPrompt = {
+         id: Date.now().toString(),
+         name: name.trim(),
+         content: noteData.structure
+      };
+      storageService.saveTemplate(t);
+      setSavedTemplates(storageService.getTemplates());
+      alert(`Template "${name}" saved!`);
+      setShowTemplates(false);
+    }
+  };
+
+  const handleLoadTemplate = (t: SavedPrompt) => {
+    setNoteData(prev => ({...prev, structure: t.content}));
+    setShowTemplates(false);
+  };
+
+  const handleDeleteTemplate = (id: string, e: React.MouseEvent) => {
+      e.stopPropagation();
+      if(confirm("Delete this template?")) {
+         storageService.deleteTemplate(id);
+         setSavedTemplates(storageService.getTemplates());
+      }
+  };
 
   // --- MANUAL SAVE HANDLER ---
   const handleManualSave = async (contentToSave: string) => {
@@ -310,8 +346,6 @@ const App: React.FC = () => {
   const getModeIcon = (mode: NoteMode) => {
     switch (mode) {
       case NoteMode.CHEAT_CODES: return <Zap size={18} className="text-amber-400" />;
-      case NoteMode.FIRST_PRINCIPLES: return <Microscope size={18} className="text-cyan-400" />;
-      case NoteMode.VISUALIZER: return <Projector size={18} className="text-purple-400" />;
       case NoteMode.CUSTOM: return <PenTool size={18} className="text-pink-400" />;
       default: return <GraduationCap size={18} className="text-neuro-primary" />;
     }
@@ -320,10 +354,8 @@ const App: React.FC = () => {
   const getModeLabel = (mode: NoteMode) => {
     switch (mode) {
       case NoteMode.CHEAT_CODES: return "Cheat Sheet";
-      case NoteMode.FIRST_PRINCIPLES: return "First Principles";
-      case NoteMode.VISUALIZER: return "Visualizer";
       case NoteMode.CUSTOM: return "Custom / Free";
-      default: return "Standard Clinical";
+      default: return "Standard";
     }
   };
 
@@ -362,7 +394,7 @@ const App: React.FC = () => {
 
         {/* Sidebar Content */}
         {appState.currentView === AppView.SETTINGS ? (
-           /* SETTINGS VIEW (Simplified - Just Keys & Storage) */
+           /* SETTINGS VIEW */
            <div className="flex-1 flex flex-col animate-fade-in overflow-hidden">
              <div className="flex items-center justify-between mb-6 pb-2 border-b border-white/5 text-neuro-primary px-1">
                <div className="flex items-center space-x-2">
@@ -647,32 +679,90 @@ const App: React.FC = () => {
                     </div>
                     
                     {/* Model Badges */}
-                    <div className="flex gap-2 mt-2">
-                       {(config.provider === AIProvider.GEMINI ? GEMINI_MODELS : groqModels).map(m => (
-                          m.value === config.model && (
-                             <span key={m.value} className="text-[9px] font-bold px-2 py-0.5 rounded bg-white/5 text-gray-400 border border-white/5">
-                                {m.badge}
-                             </span>
-                          )
-                       ))}
+                    <div className="flex justify-between items-center mt-2">
+                       <div className="flex gap-2">
+                           {(config.provider === AIProvider.GEMINI ? GEMINI_MODELS : groqModels).map(m => (
+                              m.value === config.model && (
+                                 <span key={m.value} className="text-[9px] font-bold px-2 py-0.5 rounded bg-white/5 text-gray-400 border border-white/5">
+                                    {m.badge}
+                                 </span>
+                              )
+                           ))}
+                       </div>
+                       
+                       {/* Custom Prompt Toggle */}
+                       <button 
+                         onClick={() => setShowCustomPrompt(!showCustomPrompt)}
+                         className={`text-[9px] font-bold uppercase flex items-center gap-1 transition-colors ${showCustomPrompt ? 'text-neuro-accent' : 'text-gray-500 hover:text-gray-300'}`}
+                       >
+                          <MessageSquarePlus size={12}/> Custom Instruct
+                       </button>
                     </div>
+
+                    {/* CUSTOM PROMPT FIELD (CONDITIONAL) */}
+                    {showCustomPrompt && (
+                        <div className="mt-3 animate-slide-up">
+                            <textarea 
+                                value={config.customContentPrompt || ''}
+                                onChange={(e) => setConfig(prev => ({...prev, customContentPrompt: e.target.value}))}
+                                className="w-full h-16 bg-black/20 border border-neuro-accent/30 rounded-lg p-2 text-[10px] text-gray-300 outline-none resize-none focus:border-neuro-accent"
+                                placeholder="Add specific instructions here (e.g. 'Use casual tone', 'Focus on drugs')..."
+                            />
+                        </div>
+                    )}
                  </div>
 
                  {/* 2. Structure Blueprint */}
-                 <div className="bg-neuro-surface/50 border border-white/5 p-5 rounded-2xl shadow-xl backdrop-blur-sm flex-1 flex flex-col min-h-[300px]">
+                 <div className="bg-neuro-surface/50 border border-white/5 p-5 rounded-2xl shadow-xl backdrop-blur-sm flex-1 flex flex-col min-h-[300px] relative">
                     <div className="flex items-center justify-between mb-4">
                        <label className="text-[10px] font-bold text-neuro-primary uppercase tracking-widest flex items-center gap-2">
                          <BookOpen size={14} /> Structural Blueprint
                        </label>
                        
-                       <button 
-                           onClick={handleAutoStructure}
-                           disabled={isStructLoading || !noteData.topic}
-                           className="flex items-center gap-2 px-3 py-1.5 rounded-lg text-[10px] font-bold uppercase transition-all bg-neuro-surface hover:bg-gray-700 border border-gray-700 hover:border-gray-500 text-gray-300 hover:text-white disabled:opacity-50 disabled:cursor-not-allowed"
-                        >
-                           {isStructLoading ? <RefreshCw size={12} className="animate-spin text-neuro-accent"/> : <Wand2 size={12} />}
-                           {isStructLoading ? 'Drafting with AI...' : `Auto-Draft (${config.provider === AIProvider.GEMINI ? 'Gemini' : 'Groq'})`}
-                        </button>
+                       <div className="flex gap-2">
+                           {/* TEMPLATES DROPDOWN */}
+                           <div className="relative">
+                               <button 
+                                  onClick={() => setShowTemplates(!showTemplates)}
+                                  className="flex items-center gap-2 px-3 py-1.5 rounded-lg text-[10px] font-bold uppercase transition-all bg-neuro-surface hover:bg-gray-700 border border-gray-700 hover:border-gray-500 text-gray-300 hover:text-white"
+                               >
+                                  <BookTemplate size={12}/> Templates
+                               </button>
+
+                               {/* Dropdown Menu */}
+                               {showTemplates && (
+                                   <div className="absolute right-0 top-full mt-2 w-48 bg-[#0f172a] border border-gray-700 rounded-xl shadow-2xl z-50 overflow-hidden animate-slide-up">
+                                       <div className="p-2 border-b border-gray-700 flex justify-between items-center">
+                                           <span className="text-[9px] font-bold text-gray-500">SAVED PROMPTS</span>
+                                           <button onClick={handleSaveTemplate} className="text-[10px] text-neuro-primary hover:text-white flex items-center gap-1">
+                                               <Save size={10}/> Save New
+                                           </button>
+                                       </div>
+                                       <div className="max-h-48 overflow-y-auto custom-scrollbar">
+                                           {savedTemplates.length === 0 ? (
+                                               <div className="p-3 text-[10px] text-gray-500 text-center italic">No templates saved.</div>
+                                           ) : (
+                                               savedTemplates.map(t => (
+                                                   <div key={t.id} className="group flex items-center justify-between p-2 hover:bg-gray-800 cursor-pointer">
+                                                       <span onClick={() => handleLoadTemplate(t)} className="text-xs text-gray-300 truncate flex-1">{t.name}</span>
+                                                       <button onClick={(e) => handleDeleteTemplate(t.id, e)} className="text-gray-600 hover:text-red-400 opacity-0 group-hover:opacity-100 p-1"><Trash2 size={10}/></button>
+                                                   </div>
+                                               ))
+                                           )}
+                                       </div>
+                                   </div>
+                               )}
+                           </div>
+
+                           <button 
+                               onClick={handleAutoStructure}
+                               disabled={isStructLoading || !noteData.topic}
+                               className="flex items-center gap-2 px-3 py-1.5 rounded-lg text-[10px] font-bold uppercase transition-all bg-neuro-surface hover:bg-gray-700 border border-gray-700 hover:border-gray-500 text-gray-300 hover:text-white disabled:opacity-50 disabled:cursor-not-allowed"
+                            >
+                               {isStructLoading ? <RefreshCw size={12} className="animate-spin text-neuro-accent"/> : <Wand2 size={12} />}
+                               {isStructLoading ? 'Drafting with AI...' : `Auto-Draft (${config.provider === AIProvider.GEMINI ? 'Gemini' : 'Groq'})`}
+                            </button>
+                       </div>
                     </div>
 
                     <div className="relative flex-1 group">

@@ -3,7 +3,7 @@ import React, { useState, useEffect, useMemo, useRef } from 'react';
 import { 
   Search, ArrowRight, Command, Zap, Layout, FileText, Settings, Hash, 
   BrainCircuit, Sparkles, Cpu, Maximize2, X, GraduationCap, Microscope, 
-  PenTool, FolderOpen, LogOut 
+  PenTool, FolderOpen, LogOut, Component 
 } from 'lucide-react';
 import { AppView, NoteMode, AIProvider, AppModel, HistoryItem } from '../types';
 import { StorageService } from '../services/storageService';
@@ -67,10 +67,9 @@ const CommandPalette: React.FC<CommandPaletteProps> = ({
       { id: 'ai-groq', group: 'AI Model', label: 'Switch to Groq LPU', icon: <Cpu size={14}/>, action: () => onChangeProvider(AIProvider.GROQ) },
       
       // Modes
-      { id: 'mode-general', group: 'Note Mode', label: 'Mode: Standard Clinical', icon: <GraduationCap size={14}/>, action: () => onChangeMode(NoteMode.GENERAL) },
+      { id: 'mode-general', group: 'Note Mode', label: 'Mode: Standard', icon: <GraduationCap size={14}/>, action: () => onChangeMode(NoteMode.GENERAL) },
       { id: 'mode-cheat', group: 'Note Mode', label: 'Mode: Cheat Sheet', icon: <Zap size={14}/>, action: () => onChangeMode(NoteMode.CHEAT_CODES) },
-      { id: 'mode-principles', group: 'Note Mode', label: 'Mode: First Principles', icon: <Microscope size={14}/>, action: () => onChangeMode(NoteMode.FIRST_PRINCIPLES) },
-      { id: 'mode-visual', group: 'Note Mode', label: 'Mode: Visualizer', icon: <Layout size={14}/>, action: () => onChangeMode(NoteMode.VISUALIZER) },
+      { id: 'mode-custom', group: 'Note Mode', label: 'Mode: Custom', icon: <PenTool size={14}/>, action: () => onChangeMode(NoteMode.CUSTOM) },
     ];
 
     // Dynamic Note Search
