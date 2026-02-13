@@ -1,0 +1,292 @@
+
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <link rel="icon" type="image/svg+xml" href="https://lucide.dev/icons/brain-circuit.svg" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>NeuroNote AI</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script>
+      tailwind.config = {
+        darkMode: 'class',
+        theme: {
+          extend: {
+            colors: {
+              neuro: {
+                bg: '#ffffff',       
+                surface: '#f8fafc',  
+                surfaceHighlight: '#f1f5f9', 
+                primary: '#2563eb',  /* Royal Blue */
+                primaryHover: '#1d4ed8',
+                text: '#0f172a',     
+                textMuted: '#64748b', 
+                accent: '#0891b2',   /* Cyan 600 */
+                danger: '#ef4444',
+                success: '#10b981'
+              }
+            },
+            fontFamily: {
+              sans: ['Inter', 'sans-serif'],
+              mono: ['JetBrains Mono', 'monospace'],
+            },
+            animation: {
+              'fade-in': 'fadeIn 0.3s ease-out',
+              'slide-up': 'slideUp 0.3s ease-out',
+            },
+            keyframes: {
+              fadeIn: {
+                '0%': { opacity: '0' },
+                '100%': { opacity: '1' },
+              },
+              slideUp: {
+                '0%': { transform: 'translateY(10px)', opacity: '0' },
+                '100%': { transform: 'translateY(0)', opacity: '1' },
+              }
+            }
+          }
+        }
+      }
+    </script>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800;900&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+    <style>
+      body {
+        background-color: #f8fafc; /* Fallback */
+        margin: 0;
+        font-family: 'Inter', sans-serif;
+        -webkit-font-smoothing: antialiased;
+        -moz-osx-font-smoothing: grayscale;
+      }
+      
+      .glass-panel {
+        background: rgba(255, 255, 255, 0.95);
+        border-right: 1px solid rgba(0, 0, 0, 0.05);
+      }
+
+      ::-webkit-scrollbar { width: 6px; height: 6px; }
+      ::-webkit-scrollbar-track { background: transparent; }
+      ::-webkit-scrollbar-thumb { background: #cbd5e1; border-radius: 10px; }
+      ::-webkit-scrollbar-thumb:hover { background: #94a3b8; }
+
+      /* ============================================================
+         GLOBAL THEME SYSTEM (UI + MARKDOWN)
+         ============================================================ */
+
+      /* 1. CLINICAL CLEAN (New Default - Light & Professional) */
+      .theme-clinical_clean {
+        /* UI Colors */
+        --ui-bg: #ffffff;
+        --ui-sidebar: #f8fafc; /* Slate 50 */
+        --ui-border: #e2e8f0;  /* Slate 200 */
+        --ui-text-main: #0f172a; /* Slate 900 */
+        --ui-text-muted: #64748b; /* Slate 500 */
+        --ui-primary: #2563eb; /* Royal Blue */
+        --ui-primary-glow: rgba(37, 99, 235, 0.08);
+        --ui-surface: #ffffff;
+        
+        /* Markdown Colors */
+        --md-bg: #ffffff;
+        --md-text: #334155;
+        --md-heading: #1e293b;
+        --md-border: #e2e8f0;
+        --md-accent: #2563eb;
+        --md-code-bg: #f1f5f9;
+        --md-quote-border: #2563eb;
+        --md-table-head: #f8fafc;
+        --md-table-stripe: #f8fafc;
+        --md-callout-bg: #f8fafc;
+        
+        /* Mermaid */
+        --mermaid-line: #334155 !important;
+        --mermaid-fill: #ffffff !important;
+        --mermaid-text: #0f172a !important;
+      }
+
+      /* 2. ACADEMIC PAPER (Classic Serif/Mono feel) */
+      .theme-academic_paper {
+        /* UI Colors */
+        --ui-bg: #fdfdfd; 
+        --ui-sidebar: #f4f4f5;
+        --ui-border: #d4d4d8; 
+        --ui-text-main: #18181b; 
+        --ui-text-muted: #71717a; 
+        --ui-primary: #000000; 
+        --ui-primary-glow: rgba(0, 0, 0, 0.05);
+        --ui-surface: #ffffff;
+
+        /* Markdown Colors */
+        --md-bg: #ffffff;
+        --md-text: #27272a;
+        --md-heading: #000000;
+        --md-border: #e4e4e7;
+        --md-accent: #000000;
+        --md-code-bg: #f4f4f5;
+        --md-quote-border: #000000;
+        --md-table-head: #fafafa;
+        --md-table-stripe: #fafafa;
+        --md-callout-bg: #fafafa;
+
+        /* Mermaid */
+        --mermaid-line: #000000 !important;
+        --mermaid-fill: #ffffff !important;
+        --mermaid-text: #000000 !important;
+      }
+
+      /* 3. SEPIA FOCUS (Warm, Eye-Care) */
+      .theme-sepia_focus {
+        /* UI Colors */
+        --ui-bg: #fdf6e3; /* Solarized Base3 */
+        --ui-sidebar: #eee8d5; /* Solarized Base2 */
+        --ui-border: #d3cbb7;
+        --ui-text-main: #5f4b32;
+        --ui-text-muted: #93a1a1;
+        --ui-primary: #b58900;
+        --ui-primary-glow: rgba(181, 137, 0, 0.1);
+        --ui-surface: #eee8d5;
+
+        /* Markdown Colors */
+        --md-bg: #fdf6e3;
+        --md-text: #5f4b32;
+        --md-heading: #3e2d1e;
+        --md-border: #eaddcf;
+        --md-accent: #b58900;
+        --md-code-bg: #eee8d5;
+        --md-quote-border: #d3cbb7;
+        --md-table-head: #eee8d5;
+        --md-table-stripe: #fcf5e6;
+        --md-callout-bg: rgba(0,0,0,0.03);
+
+        /* Mermaid */
+        --mermaid-line: #5f4b32 !important;
+        --mermaid-fill: #fdf6e3 !important;
+        --mermaid-text: #3e2d1e !important;
+      }
+
+
+      /* ============================================================
+         CORE STYLES USING VARIABLES
+         ============================================================ */
+
+      .markdown-body {
+        font-family: 'Inter', sans-serif !important;
+        background-color: var(--md-bg) !important;
+        color: var(--md-text) !important;
+        padding: 40px 50px;
+        border-radius: 12px;
+        min-height: 100%;
+        border: 1px solid var(--md-border);
+        box-shadow: 0 4px 20px rgba(0,0,0,0.02);
+        isolation: isolate;
+        transition: background-color 0.3s ease, color 0.3s ease;
+      }
+
+      /* Consistent Heading Sizes */
+      .markdown-body h1 { color: var(--md-heading) !important; font-size: 2.25em !important; font-weight: 800 !important; border-bottom: 2px solid var(--md-border); padding-bottom: 15px; margin-bottom: 30px; letter-spacing: -0.02em; }
+      .markdown-body h2 { color: var(--md-heading) !important; font-size: 1.5em !important; font-weight: 700 !important; margin-top: 35px; margin-bottom: 15px; padding-left: 12px; border-left: 4px solid var(--md-accent); }
+      .markdown-body h3 { color: var(--md-accent) !important; font-size: 1.15em !important; font-weight: 600 !important; margin-top: 25px; }
+      .markdown-body p, .markdown-body li { font-size: 16px; line-height: 1.7; color: var(--md-text) !important; margin-bottom: 1em; }
+      .markdown-body strong { font-weight: 700; color: var(--md-heading) !important; background-color: var(--ui-primary-glow); padding: 0 3px; border-radius: 4px; }
+      .markdown-body hr { border: none; border-bottom: 1px solid var(--md-border); margin: 30px 0; }
+
+      /* --- MODERN CALLOUTS --- */
+      .markdown-body .callout { 
+        background-color: var(--md-callout-bg) !important; 
+        border: 1px solid var(--md-border) !important; 
+        border-left-width: 4px !important; 
+        border-radius: 8px !important; 
+        margin: 20px 0 !important; 
+        overflow: hidden;
+        backdrop-filter: blur(5px);
+        box-shadow: 0 2px 10px rgba(0,0,0,0.02);
+      }
+      .markdown-body .callout-title { 
+        font-weight: 700 !important; 
+        padding: 12px 16px !important; 
+        display: flex; 
+        align-items: center; 
+        gap: 8px; 
+        font-size: 0.9em; 
+        border-bottom: 1px solid var(--md-border) !important; 
+        background-color: rgba(0,0,0,0.02); 
+        text-transform: uppercase;
+        letter-spacing: 0.05em;
+      }
+      .markdown-body .callout-content { padding: 14px 18px; font-size: 0.95em; }
+      
+      /* Specific Types */
+      .callout-info { border-left-color: var(--md-accent) !important; }
+      .callout-info .callout-title { color: var(--md-accent) !important; background: linear-gradient(90deg, rgba(99,102,241,0.05), transparent); }
+
+      .callout-abstract { border-left-color: #f59e0b !important; }
+      .callout-abstract .callout-title { color: #f59e0b !important; background: linear-gradient(90deg, rgba(245,158,11,0.05), transparent); }
+
+      .callout-tip { border-left-color: #10b981 !important; }
+      .callout-tip .callout-title { color: #10b981 !important; background: linear-gradient(90deg, rgba(16,185,129,0.05), transparent); }
+
+      .callout-danger { border-left-color: #ef4444 !important; }
+      .callout-danger .callout-title { color: #ef4444 !important; background: linear-gradient(90deg, rgba(239,68,68,0.05), transparent); }
+
+      .callout-question { border-left-color: #8b5cf6 !important; }
+      .callout-question .callout-title { color: #8b5cf6 !important; background: linear-gradient(90deg, rgba(139,92,246,0.05), transparent); }
+
+      .callout-example { border-left-color: #06b6d4 !important; }
+      .callout-example .callout-title { color: #06b6d4 !important; background: linear-gradient(90deg, rgba(6,182,212,0.05), transparent); }
+
+      .callout-quote { border-left-color: #64748b !important; font-style: italic; }
+      .callout-quote .callout-title { color: #94a3b8 !important; }
+
+      /* Tables */
+      .markdown-body table { width: 100%; border-collapse: collapse; margin: 20px 0; font-size: 0.95em; border: 1px solid var(--md-border); }
+      .markdown-body th { background-color: var(--md-table-head) !important; color: var(--md-heading) !important; font-weight: 600; padding: 12px; border-bottom: 2px solid var(--md-border); text-align: left; }
+      .markdown-body td { border-bottom: 1px solid var(--md-border); padding: 10px 12px; color: var(--md-text) !important; }
+      .markdown-body tr:nth-child(even) td { background-color: var(--md-table-stripe) !important; }
+
+      /* Code */
+      .markdown-body code { background-color: var(--md-code-bg); color: var(--md-accent); padding: 0.2em 0.4em; border-radius: 4px; font-size: 85%; }
+      .markdown-body pre code { background-color: transparent; color: inherit; padding: 0; }
+
+      /* Images */
+      .markdown-body img { display: block; margin: 20px auto; border-radius: 6px; border: 1px solid var(--md-border); max-width: 100%; }
+
+      /* Mermaid */
+      .mermaid-container { background-color: var(--md-bg) !important; border: 1px solid var(--md-border); border-radius: 8px; margin: 25px 0; overflow: visible; display: block; }
+      /* FORCE SVG TO NOT SHRINK */
+      .mermaid svg { font-family: 'Inter', sans-serif !important; max-width: none !important; height: auto !important; }
+      .node rect, .node circle, .node polygon, .node path { fill: var(--md-bg) !important; stroke: var(--mermaid-line) !important; stroke-width: 1.5px !important; }
+      .node .label { color: var(--mermaid-text) !important; }
+      .edgePath .path { stroke: var(--mermaid-line) !important; stroke-width: 1.5px !important; }
+      .marker { fill: var(--mermaid-line) !important; stroke: var(--mermaid-line) !important; }
+      .flowchart-link { stroke: var(--mermaid-line) !important; }
+      .mermaid text, .mermaid tspan { fill: var(--mermaid-text) !important; font-family: 'Inter', sans-serif !important; }
+
+      /* Sensor Mode */
+      .sensor-blur { filter: blur(5px); opacity: 0.7; background: var(--md-code-bg); cursor: pointer; transition: all 0.2s ease; border-radius: 4px; }
+      .sensor-blur:hover { opacity: 0.9; background: var(--md-border); }
+
+      /* Mobile */
+      @media (max-width: 640px) { .markdown-body { padding: 20px; } .markdown-body h1 { font-size: 1.75em !important; } }
+
+    </style>
+  <script type="importmap">
+{
+  "imports": {
+    "react-markdown": "https://esm.sh/react-markdown@^10.1.0",
+    "react-dom/": "https://esm.sh/react-dom@^19.2.4/",
+    "react/": "https://esm.sh/react@^19.2.4/",
+    "react": "https://esm.sh/react@^19.2.4",
+    "@google/genai": "https://esm.sh/@google/genai@^1.40.0",
+    "@supabase/supabase-js": "https://esm.sh/@supabase/supabase-js@^2.39.0",
+    "lucide-react": "https://esm.sh/lucide-react@^0.563.0",
+    "mermaid": "https://esm.sh/mermaid@^11.12.2",
+    "remark-gfm": "https://esm.sh/remark-gfm@^4.0.1",
+    "groq-sdk": "https://esm.sh/groq-sdk@0.7.0"
+  }
+}
+</script>
+<link rel="stylesheet" href="/index.css">
+</head>
+  <body>
+    <div id="root"></div>
+  <script type="module" src="/index.tsx"></script>
+</body>
+</html>
