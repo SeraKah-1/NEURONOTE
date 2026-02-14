@@ -2,7 +2,7 @@
 import React, { useEffect, useRef, useState, useMemo, useCallback } from 'react';
 import { HistoryItem, NoteMode } from '../types';
 import { StorageService } from '../services/storageService';
-import { ZoomIn, ZoomOut, RefreshCw, Maximize2, Search, Filter, Trash2, FileText, X, Share2, Focus, GripHorizontal } from 'lucide-react';
+import { ZoomIn, ZoomOut, RefreshCw, Maximize2, Search, Filter, Trash2, FileText, X, Share2, Focus, GripHorizontal, BrainCircuit } from 'lucide-react';
 
 interface GraphViewProps {
   onSelectNote: (note: HistoryItem) => void;
@@ -44,7 +44,7 @@ const GraphView: React.FC<GraphViewProps> = ({ onSelectNote }) => {
   const [searchQuery, setSearchQuery] = useState('');
   const [contextMenu, setContextMenu] = useState<{x: number, y: number, node: Node} | null>(null);
   const [spotlightNode, setSpotlightNode] = useState<string | null>(null); // ID of focused node
-  const [isSidebarOpen, setIsSidebarOpen] = useState(false); // For mobile controls
+  const [hasData, setHasData] = useState(false); // Empty state tracker
 
   // Physics State
   const nodesRef = useRef<Node[]>([]);
@@ -81,12 +81,16 @@ const GraphView: React.FC<GraphViewProps> = ({ onSelectNote }) => {
         canvasRef.current.style.width = `${rect.width}px`;
         canvasRef.current.style.height = `${rect.height}px`;
         
-        // Center initial view
-        setTransform(prev => ({ ...prev, x: rect.width / 2, y: rect.height / 2 }));
+        // Center initial view if transform hasn't been set
+        if (transform.x === 0 && transform.y === 0) {
+            setTransform(prev => ({ ...prev, x: rect.width / 2, y: rect.height / 2 }));
+        }
       }
     };
     window.addEventListener('resize', handleResize);
-    handleResize();
+    // Delay initial resize slightly to allow container layout to settle
+    setTimeout(handleResize, 100); 
+    
     return () => {
       window.removeEventListener('resize', handleResize);
       cancelAnimationFrame(animationRef.current);
@@ -94,6 +98,15 @@ const GraphView: React.FC<GraphViewProps> = ({ onSelectNote }) => {
   }, [loadData]);
 
   const initSimulation = (items: HistoryItem[]) => {
+    // Note: We don't return early even if empty, so the canvas loop still runs (drawing grid)
+    if (items.length === 0) {
+        setHasData(false);
+        nodesRef.current = [];
+        linksRef.current = [];
+        return;
+    }
+    setHasData(true);
+
     if (!containerRef.current) return;
     const width = containerRef.current.clientWidth;
     const height = containerRef.current.clientHeight;
@@ -150,9 +163,12 @@ const GraphView: React.FC<GraphViewProps> = ({ onSelectNote }) => {
   useEffect(() => {
     let isRunning = true;
 
-    // Get CSS Variables for Theme
-    const computedStyle = getComputedStyle(document.body);
-    const getVar = (name: string) => computedStyle.getPropertyValue(name).trim();
+    // Helper to get CSS Variable from the container (where the theme class lives), NOT body
+    const getVar = (name: string, fallback: string) => {
+        if (!containerRef.current) return fallback;
+        const val = getComputedStyle(containerRef.current).getPropertyValue(name).trim();
+        return val || fallback;
+    };
 
     const tick = () => {
       if (!isRunning || !canvasRef.current) return;
@@ -161,11 +177,10 @@ const GraphView: React.FC<GraphViewProps> = ({ onSelectNote }) => {
       const nodes = nodesRef.current;
       const links = linksRef.current;
       
-      // Physics Constants
       const REPULSION = 1000;
-      const SPRING_LEN = 120;
-      const CENTER_GRAVITY = 0.002;
-      const DT = 0.5;
+      const SPRING_LEN = 150;
+      const CENTER_GRAVITY = 0.001; // Weaker gravity for more spread
+      const DT = 0.6;
 
       for (let i = 0; i < nodes.length; i++) {
         for (let j = i + 1; j < nodes.length; j++) {
@@ -188,7 +203,7 @@ const GraphView: React.FC<GraphViewProps> = ({ onSelectNote }) => {
         const dx = l.targetNode.x - l.sourceNode.x;
         const dy = l.targetNode.y - l.sourceNode.y;
         const dist = Math.sqrt(dx*dx + dy*dy) || 1;
-        const f = (dist - SPRING_LEN) * 0.01;
+        const f = (dist - SPRING_LEN) * 0.02;
         const fx = (dx/dist)*f; const fy = (dy/dist)*f;
         l.sourceNode.vx += fx; l.sourceNode.vy += fy;
         l.targetNode.vx -= fx; l.targetNode.vy -= fy;
@@ -209,17 +224,30 @@ const GraphView: React.FC<GraphViewProps> = ({ onSelectNote }) => {
       const width = canvasRef.current.width / dpr;
       const height = canvasRef.current.height / dpr;
 
-      // Theme Colors
-      const bg = getVar('--ui-bg') || '#ffffff';
-      const textMain = getVar('--ui-text-main') || '#0f172a';
-      const textMuted = getVar('--ui-text-muted') || '#64748b';
-      const primary = getVar('--ui-primary') || '#2563eb';
+      // Dynamic Theme Colors
+      const bg = getVar('--ui-bg', '#ffffff');
+      const textMain = getVar('--ui-text-main', '#0f172a');
+      const border = getVar('--ui-border', '#e2e8f0');
 
       // Clear
       ctx.resetTransform();
       ctx.scale(dpr, dpr);
       ctx.clearRect(0, 0, width, height);
       
+      // Draw Background Grid (To prove canvas is alive)
+      ctx.strokeStyle = border;
+      ctx.lineWidth = 0.5;
+      ctx.globalAlpha = 0.3;
+      const gridSize = 50 * transform.k;
+      const offsetX = transform.x % gridSize;
+      const offsetY = transform.y % gridSize;
+      
+      ctx.beginPath();
+      for (let x = offsetX; x < width; x += gridSize) { ctx.moveTo(x, 0); ctx.lineTo(x, height); }
+      for (let y = offsetY; y < height; y += gridSize) { ctx.moveTo(0, y); ctx.lineTo(width, y); }
+      ctx.stroke();
+      ctx.globalAlpha = 1;
+
       // Transform Camera
       ctx.translate(transform.x, transform.y);
       ctx.scale(transform.k, transform.k);
@@ -227,8 +255,6 @@ const GraphView: React.FC<GraphViewProps> = ({ onSelectNote }) => {
       // Links
       links.forEach(l => {
         if (!l.sourceNode || !l.targetNode) return;
-        
-        // Spotlight Logic: Hide links not connected to focused node
         const isConnectedToSpotlight = spotlightNode && (l.source === spotlightNode || l.target === spotlightNode);
         if (spotlightNode && !isConnectedToSpotlight) {
             ctx.globalAlpha = 0.05;
@@ -246,10 +272,7 @@ const GraphView: React.FC<GraphViewProps> = ({ onSelectNote }) => {
 
       // Nodes
       nodes.forEach(n => {
-        // Search Filter
         const isMatch = !searchQuery || n.label.toLowerCase().includes(searchQuery.toLowerCase());
-        
-        // Spotlight Filter
         const isSpotlight = n.id === spotlightNode;
         const isNeighbor = spotlightNode && links.some(l => (l.source === spotlightNode && l.target === n.id) || (l.target === spotlightNode && l.source === n.id));
         
@@ -259,7 +282,7 @@ const GraphView: React.FC<GraphViewProps> = ({ onSelectNote }) => {
 
         ctx.globalAlpha = alpha;
 
-        // Shadow/Glow
+        // Glow
         if (isSpotlight || (searchQuery && isMatch)) {
             ctx.shadowColor = n.color;
             ctx.shadowBlur = 20;
@@ -276,14 +299,13 @@ const GraphView: React.FC<GraphViewProps> = ({ onSelectNote }) => {
         ctx.strokeStyle = n.color;
         ctx.stroke();
 
-        // Label (LOD: Show only if zoomed in, spotlighted, or matches search)
+        // Label (LOD)
         if (transform.k > 0.6 || isSpotlight || isNeighbor || (searchQuery && isMatch)) {
-            ctx.shadowBlur = 0; // Reset shadow for text
+            ctx.shadowBlur = 0;
             ctx.font = `bold 12px Inter, sans-serif`;
             ctx.textAlign = 'center';
             ctx.textBaseline = 'middle';
             
-            // Label Background
             const textWidth = ctx.measureText(n.label).width;
             ctx.fillStyle = bg;
             ctx.globalAlpha = alpha * 0.8;
@@ -318,7 +340,6 @@ const GraphView: React.FC<GraphViewProps> = ({ onSelectNote }) => {
        cy = (e as React.MouseEvent).clientY;
     }
     
-    // World Coords
     const x = (cx - rect.left - transform.x) / transform.k;
     const y = (cy - rect.top - transform.y) / transform.k;
     return { x, y, cx, cy };
@@ -328,17 +349,14 @@ const GraphView: React.FC<GraphViewProps> = ({ onSelectNote }) => {
     for (let i = nodesRef.current.length - 1; i >= 0; i--) {
       const n = nodesRef.current[i];
       const dist = Math.sqrt((n.x - x)**2 + (n.y - y)**2);
-      if (dist < n.radius + 10) return n; // Hit tolerance
+      if (dist < n.radius + 10) return n;
     }
     return null;
   };
 
-  // TOUCH START
   const handleStart = (e: React.TouchEvent | React.MouseEvent) => {
-    // 0. Close menu
     if (contextMenu) setContextMenu(null);
 
-    // 1. Pinch Zoom Check
     if ('touches' in e && e.touches.length === 2) {
        const dx = e.touches[0].clientX - e.touches[1].clientX;
        const dy = e.touches[0].clientY - e.touches[1].clientY;
@@ -349,39 +367,28 @@ const GraphView: React.FC<GraphViewProps> = ({ onSelectNote }) => {
     const { x, y, cx, cy } = getPos(e);
     const node = getNodeAt(x, y);
 
-    // 2. Node Interaction
     if (node) {
        isDragging.current = true;
        dragNode.current = node;
        dragStartPos.current = { x: cx, y: cy };
-       
-       // Spotlight Effect Logic
        setSpotlightNode(node.id);
-    } 
-    // 3. Pan Background
-    else {
-       isDragging.current = true; // reusing flag for panning
+    } else {
+       isDragging.current = true;
        dragNode.current = null;
        dragStartPos.current = { x: cx, y: cy };
-       // Clear spotlight if clicking bg
        if (spotlightNode) setSpotlightNode(null);
     }
   };
 
-  // TOUCH MOVE
   const handleMove = (e: React.TouchEvent | React.MouseEvent) => {
-    // 1. Pinch Zoom Logic
     if ('touches' in e && e.touches.length === 2 && lastTouchDistance.current) {
         const dx = e.touches[0].clientX - e.touches[1].clientX;
         const dy = e.touches[0].clientY - e.touches[1].clientY;
         const dist = Math.sqrt(dx*dx + dy*dy);
         const delta = dist - lastTouchDistance.current;
-        
-        // Apply Zoom
         const zoomSpeed = 0.005;
         const newK = Math.max(0.2, Math.min(3, transform.k + delta * zoomSpeed));
         setTransform(prev => ({ ...prev, k: newK }));
-        
         lastTouchDistance.current = dist;
         return;
     }
@@ -392,41 +399,23 @@ const GraphView: React.FC<GraphViewProps> = ({ onSelectNote }) => {
     const dx = cx - dragStartPos.current.x;
     const dy = cy - dragStartPos.current.y;
 
-    // Node Drag
     if (dragNode.current) {
        dragNode.current.x = x;
        dragNode.current.y = y;
        dragNode.current.vx = 0; 
        dragNode.current.vy = 0;
-    } 
-    // Canvas Pan
-    else {
+    } else {
        setTransform(prev => ({ ...prev, x: prev.x + dx, y: prev.y + dy }));
        dragStartPos.current = { x: cx, y: cy };
     }
   };
 
-  // TOUCH END
   const handleEnd = (e: React.TouchEvent | React.MouseEvent) => {
     lastTouchDistance.current = null;
     isDragging.current = false;
-
-    // Check for "Click" vs "Drag"
-    if (dragNode.current) {
-        const { cx, cy } = 'touches' in e ? { cx: e.changedTouches[0].clientX, cy: e.changedTouches[0].clientY } : { cx: (e as React.MouseEvent).clientX, cy: (e as React.MouseEvent).clientY };
-        const dist = Math.sqrt((cx - dragStartPos.current.x)**2 + (cy - dragStartPos.current.y)**2);
-        
-        // If movement < 5px, treat as click
-        if (dist < 5) {
-            // Mobile: Double Tap to Open? Or single tap focus, long press menu?
-            // For now: Single tap sets focus (already done in Start). 
-            // We can add a button in UI to "Open Focused Note"
-        }
-        dragNode.current = null;
-    }
+    dragNode.current = null;
   };
 
-  // CONTEXT MENU (Long Press Simulation or Right Click)
   const handleContextMenu = (e: React.MouseEvent) => {
       e.preventDefault();
       const { x, y } = getPos(e);
@@ -437,8 +426,23 @@ const GraphView: React.FC<GraphViewProps> = ({ onSelectNote }) => {
   };
 
   return (
-    <div className="w-full h-full relative bg-[var(--ui-bg)] overflow-hidden touch-none select-none">
+    <div ref={containerRef} className="w-full h-full relative bg-[var(--ui-bg)] overflow-hidden touch-none select-none">
         
+        {/* Placeholder - Only shows if truly no data, but canvas grid will still render behind it */}
+        {!hasData && (
+            <div className="absolute inset-0 flex flex-col items-center justify-center z-10 pointer-events-none p-6">
+                <div className="bg-[var(--ui-surface)]/80 backdrop-blur-md p-8 rounded-2xl border border-[var(--ui-border)] shadow-2xl text-center max-w-sm">
+                    <div className="w-16 h-16 bg-[var(--ui-bg)] rounded-full flex items-center justify-center mx-auto mb-4 shadow-inner border border-[var(--ui-border)]">
+                        <BrainCircuit size={32} className="text-[var(--ui-text-muted)]" />
+                    </div>
+                    <h3 className="text-lg font-bold text-[var(--ui-text-main)] mb-2">Neural Network Offline</h3>
+                    <p className="text-xs text-[var(--ui-text-muted)] leading-relaxed">
+                        The synapse graph is currently empty. Create notes in the Workspace to visualize connections.
+                    </p>
+                </div>
+            </div>
+        )}
+
         {/* CANVAS LAYER */}
         <canvas 
             ref={canvasRef}
@@ -453,12 +457,9 @@ const GraphView: React.FC<GraphViewProps> = ({ onSelectNote }) => {
             onContextMenu={handleContextMenu}
         />
 
-        {/* --- MOBILE/DESKTOP HUD --- */}
-        
-        {/* 1. Top Bar: Search & Status */}
+        {/* HUD Controls */}
         <div className="absolute top-4 left-4 right-4 z-20 flex justify-between items-start pointer-events-none">
             <div className="flex flex-col gap-2 pointer-events-auto w-full max-w-xs">
-                {/* Glass Panel */}
                 <div className="bg-[var(--ui-surface)]/80 backdrop-blur-md border border-[var(--ui-border)] p-3 rounded-2xl shadow-xl flex items-center gap-3">
                     <div className="p-2 bg-[var(--ui-primary)] text-white rounded-xl shadow-lg shadow-blue-500/30">
                         <Maximize2 size={18} />
@@ -468,26 +469,10 @@ const GraphView: React.FC<GraphViewProps> = ({ onSelectNote }) => {
                         <p className="text-[10px] text-[var(--ui-text-muted)]">{nodesRef.current.length} Nodes Active</p>
                     </div>
                 </div>
-
-                {/* Search Bar */}
-                <div className="bg-[var(--ui-surface)]/90 backdrop-blur-md border border-[var(--ui-border)] p-1 rounded-xl flex items-center shadow-lg transition-all focus-within:ring-2 ring-[var(--ui-primary)]/50">
-                    <Search size={14} className="text-[var(--ui-text-muted)] ml-2" />
-                    <input 
-                        type="text" 
-                        value={searchQuery}
-                        onChange={(e) => setSearchQuery(e.target.value)}
-                        placeholder="Filter nodes..."
-                        className="bg-transparent border-none outline-none text-xs text-[var(--ui-text-main)] p-2 w-full placeholder:text-[var(--ui-text-muted)]"
-                    />
-                    {searchQuery && <button onClick={() => setSearchQuery('')} className="p-1 hover:bg-[var(--ui-bg)] rounded-full text-[var(--ui-text-muted)]"><X size={12}/></button>}
-                </div>
             </div>
         </div>
 
-        {/* 2. Bottom Controls (Mobile Friendly) */}
         <div className="absolute bottom-6 left-0 right-0 flex justify-center gap-4 z-20 pointer-events-none px-6">
-            
-            {/* Dynamic Action Button (Appears when node selected) */}
             {spotlightNode && (
                 <div className="pointer-events-auto animate-slide-up">
                     <button 
@@ -502,7 +487,6 @@ const GraphView: React.FC<GraphViewProps> = ({ onSelectNote }) => {
                 </div>
             )}
 
-            {/* Navigation Fab */}
             <div className="pointer-events-auto bg-[var(--ui-surface)]/90 backdrop-blur-md border border-[var(--ui-border)] rounded-full p-1.5 flex items-center gap-1 shadow-2xl">
                 <button onClick={() => setTransform(t => ({...t, k: Math.min(t.k + 0.2, 3)}))} className="p-3 hover:bg-[var(--ui-bg)] rounded-full text-[var(--ui-text-main)] transition-colors"><ZoomIn size={20}/></button>
                 <button onClick={() => { setTransform({ x: containerRef.current!.clientWidth/2, y: containerRef.current!.clientHeight/2, k: 0.8 }); setSpotlightNode(null); }} className="p-3 hover:bg-[var(--ui-bg)] rounded-full text-[var(--ui-text-main)] transition-colors"><RefreshCw size={20}/></button>
@@ -510,7 +494,7 @@ const GraphView: React.FC<GraphViewProps> = ({ onSelectNote }) => {
             </div>
         </div>
 
-        {/* 3. Context Menu (Desktop Right Click / Mobile Long Press) */}
+        {/* Context Menu */}
         {contextMenu && (
             <div 
                 className="fixed z-50 bg-[var(--ui-surface)] border border-[var(--ui-border)] rounded-xl shadow-2xl py-1 w-48 animate-fade-in backdrop-blur-xl"
@@ -535,7 +519,6 @@ const GraphView: React.FC<GraphViewProps> = ({ onSelectNote }) => {
                 </button>
             </div>
         )}
-
     </div>
   );
 };

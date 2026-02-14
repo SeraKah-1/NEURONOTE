@@ -144,7 +144,19 @@ const App: React.FC = () => {
     fetchModels();
   }, [config.provider, config.groqApiKey]);
 
-  const handleSaveTemplate = () => { const name = prompt("Name:"); if (name) { const t: SavedPrompt = { id: Date.now().toString(), name: name.trim(), content: noteData.structure }; storageService.saveTemplate(t); setSavedTemplates(storageService.getTemplates()); setShowTemplates(false); } };
+  const handleSaveTemplate = () => { 
+      if (savedTemplates.length >= 5) {
+          alert("LIMIT REACHED: Maximum 5 templates allowed. Please delete old ones.");
+          return;
+      }
+      const name = prompt("Name:"); 
+      if (name) { 
+          const t: SavedPrompt = { id: Date.now().toString(), name: name.trim(), content: noteData.structure }; 
+          storageService.saveTemplate(t); 
+          setSavedTemplates(storageService.getTemplates()); 
+          setShowTemplates(false); 
+      } 
+  };
   const handleLoadTemplate = (t: SavedPrompt) => { setNoteData(prev => ({...prev, structure: t.content})); setShowTemplates(false); };
   const handleDeleteTemplate = (id: string, e: React.MouseEvent) => { e.stopPropagation(); if(confirm("Delete?")) { storageService.deleteTemplate(id); setSavedTemplates(storageService.getTemplates()); } };
 
@@ -345,7 +357,7 @@ const App: React.FC = () => {
            </button>
         )}
 
-        <div className={`relative z-10 flex-1 flex flex-col h-full ${appState.currentView === AppView.GRAPH ? 'p-0 overflow-hidden' : 'p-4 md:p-8 lg:p-10 overflow-y-auto custom-scrollbar'} ${focusMode ? 'px-[15%] pt-10' : ''}`}>
+        <div className={`relative z-10 flex-1 flex flex-col h-full ${appState.currentView === AppView.GRAPH ? 'p-0 overflow-hidden' : 'p-4 md:p-8 lg:p-10 overflow-y-auto custom-scrollbar'} ${focusMode ? 'px-[15%] pt-10' : 'pb-20 md:pb-10'}`}>
           
           {appState.currentView !== AppView.GRAPH && !focusMode && (
             <div className="flex justify-between items-start mb-6 shrink-0">
@@ -534,14 +546,20 @@ const App: React.FC = () => {
                     </div>
                     {showTemplates && (
                         <div className="absolute right-5 top-16 w-48 bg-[var(--ui-sidebar)] border border-[var(--ui-border)] rounded-xl shadow-2xl z-50 overflow-hidden animate-slide-up">
+                            <div className="p-2 border-b border-[var(--ui-border)] text-[10px] text-center font-bold text-[var(--ui-text-muted)]">
+                                {savedTemplates.length}/5 Slots Used
+                            </div>
                             <div className="max-h-48 overflow-y-auto custom-scrollbar">
                                 {savedTemplates.map(t => (
                                     <div key={t.id} onClick={() => handleLoadTemplate(t)} className="flex items-center justify-between p-2 hover:bg-[var(--ui-bg)] cursor-pointer text-xs text-[var(--ui-text-main)]">
                                         <span>{t.name}</span>
-                                        <button onClick={(e) => handleDeleteTemplate(t.id, e)} className="text-red-400"><Trash2 size={10}/></button>
+                                        <button onClick={(e) => handleDeleteTemplate(t.id, e)} className="text-[var(--ui-text-muted)] hover:text-red-500 p-1.5 rounded-md hover:bg-red-50 transition-colors"><Trash2 size={14}/></button>
                                     </div>
                                 ))}
                             </div>
+                            <button onClick={handleSaveTemplate} className="w-full py-2 bg-[var(--ui-primary)] hover:opacity-90 text-white text-[10px] font-bold uppercase flex items-center justify-center gap-2">
+                                <Save size={12}/> Save Current
+                            </button>
                         </div>
                     )}
                     <textarea value={noteData.structure} onChange={(e) => setNoteData({ ...noteData, structure: e.target.value })} className="flex-1 w-full bg-[var(--ui-bg)] border border-[var(--ui-border)] rounded-xl p-5 text-sm font-mono text-[var(--ui-text-main)] placeholder-[var(--ui-text-muted)] focus:border-[var(--ui-primary)] outline-none resize-none transition-all leading-6 custom-scrollbar" placeholder="# 1. Definition..." disabled={isStructLoading} />

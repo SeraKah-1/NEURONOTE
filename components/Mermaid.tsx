@@ -1,6 +1,6 @@
 
 import React, { useEffect, useRef, useState, memo } from 'react';
-import { ZoomIn, ZoomOut, RotateCcw, AlertTriangle, Eye, RefreshCw, Move } from 'lucide-react';
+import { ZoomIn, ZoomOut, RotateCcw, AlertTriangle, RefreshCw } from 'lucide-react';
 
 interface MermaidProps {
   chart: string;
@@ -67,15 +67,11 @@ const Mermaid: React.FC<MermaidProps> = memo(({ chart }) => {
           // Remove width/height attributes that constrain SVG to container width
           // causing it to shrink and become unreadable on complex diagrams.
           let fixedSvg = svg
-             .replace(/width="[^"]*"/, '')
-             .replace(/height="[^"]*"/, '')
-             .replace(/style="[^"]*"/, 'style="max-width: none !important;"');
+             .replace(/width="[\d\.]+(px|%)?"/gi, '')
+             .replace(/height="[\d\.]+(px|%)?"/gi, '')
+             .replace(/style="[^"]*"/gi, '') // Remove inline max-width/height styles completely
+             .replace('<svg', '<svg style="max-width: none !important; min-width: 100%; height: auto;"');
           
-          // Ensure style tag exists if regex didn't match
-          if (!fixedSvg.includes('style="max-width: none')) {
-             fixedSvg = fixedSvg.replace('<svg', '<svg style="max-width: none !important;"');
-          }
-
           setSvg(fixedSvg);
           setError(false);
           setLoading(false);
@@ -171,7 +167,7 @@ const Mermaid: React.FC<MermaidProps> = memo(({ chart }) => {
 
       <div 
         className={`relative ${panning ? 'cursor-grabbing' : 'cursor-grab'} bg-[var(--md-bg)] rounded-lg overflow-auto custom-scrollbar border border-[var(--md-border)]`}
-        style={{ minHeight: '350px' }} 
+        style={{ minHeight: '350px', maxHeight: '70vh' }} 
         ref={containerRef}
         onMouseDown={handleMouseDown}
         onMouseMove={handleMouseMove}
@@ -181,26 +177,19 @@ const Mermaid: React.FC<MermaidProps> = memo(({ chart }) => {
         {loading ? (
            <div className="absolute inset-0 flex flex-col items-center justify-center text-gray-400">
                <RefreshCw size={24} className="animate-spin mb-2 text-[var(--ui-text-main)]"/>
-               <span className="text-xs font-bold text-[var(--ui-text-main)] tracking-widest">RENDERING DIAGRAM...</span>
+               <span className="text-xs font-bold text-[var(--ui-text-main)] tracking-widest">RENDERING...</span>
            </div>
         ) : (
            <div 
-             className="w-fit h-full flex items-center justify-center p-12 origin-center mx-auto"
+             className="w-fit h-full flex items-start justify-center p-4 origin-top-left mx-auto"
              style={{ 
                 transform: `scale(${scale}) translate(${position.x / scale}px, ${position.y / scale}px)`,
                 transition: panning ? 'none' : 'transform 0.1s ease-out',
-                /* CRITICAL: Allow div to expand naturally to fit the SVG */
-                minWidth: '100%',
-                minHeight: '100%'
+                minWidth: '100%'
              }}
              dangerouslySetInnerHTML={{ __html: svg }}
            />
         )}
-      </div>
-      
-      <div className="absolute bottom-2 left-2 flex items-center gap-2 pointer-events-none opacity-50">
-         <Move size={12} className="text-[var(--ui-text-muted)]"/> 
-         <span className="text-[9px] font-bold text-[var(--ui-text-muted)]">DRAG TO PAN • SCROLL TO ZOOM</span>
       </div>
     </div>
   );

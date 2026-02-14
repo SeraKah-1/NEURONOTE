@@ -1,3 +1,4 @@
+
 import React, { useState, useEffect, useRef, useMemo, useCallback } from 'react';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
@@ -252,24 +253,24 @@ const OutputDisplay: React.FC<OutputDisplayProps> = ({ content, topic, onUpdateC
       {/* Main Panel */}
       <div className="flex-1 bg-[var(--ui-bg)] rounded-xl border border-[var(--ui-border)] overflow-hidden flex flex-col relative shadow-2xl">
         
-        {/* NEW THEMED TOOLBAR */}
-        <div className="h-16 border-b border-[var(--ui-border)] bg-[var(--ui-sidebar)] flex justify-between items-center px-6 shrink-0 transition-colors duration-300">
+        {/* NEW THEMED TOOLBAR (Scrollable on Mobile) */}
+        <div className="h-16 border-b border-[var(--ui-border)] bg-[var(--ui-sidebar)] flex justify-between items-center px-4 shrink-0 transition-colors duration-300 overflow-x-auto no-scrollbar gap-4">
            
            {/* Mode Toggles */}
-           <div className="flex gap-1 bg-[var(--ui-bg)] p-1 rounded-full border border-[var(--ui-border)] shadow-inner">
+           <div className="flex gap-1 bg-[var(--ui-bg)] p-1 rounded-full border border-[var(--ui-border)] shadow-inner shrink-0">
               <button onClick={() => setActiveTab('preview')} className={`px-4 py-1.5 rounded-full text-xs font-bold flex items-center gap-2 transition-all ${activeTab === 'preview' ? 'bg-[var(--ui-surface)] text-[var(--ui-text-main)] shadow-sm border border-[var(--ui-border)]' : 'text-[var(--ui-text-muted)] hover:text-[var(--ui-text-main)]'}`}><Eye size={14}/> Read</button>
               <button onClick={() => setActiveTab('code')} className={`px-4 py-1.5 rounded-full text-xs font-bold flex items-center gap-2 transition-all ${activeTab === 'code' ? 'bg-[var(--ui-surface)] text-[var(--ui-text-main)] shadow-sm border border-[var(--ui-border)]' : 'text-[var(--ui-text-muted)] hover:text-[var(--ui-text-main)]'}`}><Edit3 size={14}/> Edit</button>
            </div>
 
            {/* Tool Actions */}
-           <div className="flex items-center gap-2">
+           <div className="flex items-center gap-2 shrink-0">
               <button onClick={() => setSensorMode(!sensorMode)} className={`p-2 rounded-full transition-all border ${sensorMode ? 'bg-amber-100 border-amber-300 text-amber-600' : 'bg-[var(--ui-bg)] border-[var(--ui-border)] text-[var(--ui-text-muted)] hover:text-[var(--ui-primary)]'}`} title="Active Recall Mode">
                  {sensorMode ? <EyeOff size={16}/> : <Eye size={16}/>}
               </button>
               
               <div className="h-6 w-[1px] bg-[var(--ui-border)] mx-1"></div>
               
-              <div className="flex bg-[var(--ui-bg)] rounded-full border border-[var(--ui-border)] p-0.5">
+              <div className="flex bg-[var(--ui-bg)] rounded-full border border-[var(--ui-border)] p-0.5 shrink-0">
                   <button onClick={() => setShowToc(!showToc)} className="p-2 rounded-full text-[var(--ui-text-muted)] hover:text-[var(--ui-text-main)] hover:bg-[var(--ui-surface)] transition-colors" title="Toggle TOC"><List size={16}/></button>
                   <button onClick={handleFixSyntax} className="p-2 rounded-full text-[var(--ui-text-muted)] hover:text-[var(--ui-text-main)] hover:bg-[var(--ui-surface)] transition-colors" title="Fix Syntax"><Wand2 size={16} className={syntaxFixed ? 'text-green-500' : ''}/></button>
                   <button onClick={handleCopy} className="p-2 rounded-full text-[var(--ui-text-muted)] hover:text-[var(--ui-text-main)] hover:bg-[var(--ui-surface)] transition-colors" title="Copy">{copied ? <Check size={16}/> : <Copy size={16}/>}</button>
@@ -279,7 +280,7 @@ const OutputDisplay: React.FC<OutputDisplayProps> = ({ content, topic, onUpdateC
 
               <button 
                   onClick={handleManualSaveTrigger} 
-                  className={`flex items-center gap-2 px-4 py-2 rounded-full text-xs font-bold transition-all ml-2 shadow-lg ${isDirty ? 'bg-[var(--ui-primary)] text-white hover:opacity-90 animate-pulse' : 'bg-[var(--ui-surface)] border border-[var(--ui-border)] text-[var(--ui-text-muted)]'}`}
+                  className={`flex items-center gap-2 px-4 py-2 rounded-full text-xs font-bold transition-all ml-2 shadow-lg shrink-0 ${isDirty ? 'bg-[var(--ui-primary)] text-white hover:opacity-90 animate-pulse' : 'bg-[var(--ui-surface)] border border-[var(--ui-border)] text-[var(--ui-text-muted)]'}`}
               >
                   <Save size={14}/> {isDirty ? 'Save Changes' : 'Saved'}
               </button>

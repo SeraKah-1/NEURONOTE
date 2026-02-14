@@ -85,44 +85,62 @@ export const generateNoteContent = async (
     if (config.mode === NoteMode.COMPREHENSIVE) {
        onProgress("COMPREHENSIVE MODE: Analyzing Blueprint Structure...");
        
-       // IMPROVED SPLITTING LOGIC: 
-       // Split by top-level headers (# or ##), but keep the content in between attached to the header.
-       // Regex finds a line starting with #, captures it, and everything until the next #.
+       // IMPROVED SPLITTING LOGIC (ROBUST): 
+       // Split by top-level headers (# or ##)
        const rawSections = structure.split(/(?=^#{1,2}\s)/gm).filter(s => s.trim().length > 0);
        
        let fullContent = `> [!abstract] COMPREHENSIVE TEXTBOOK: ${topic.toUpperCase()}\n\n`;
        fullContent += `_Generated via NeuroNote Batch Engine (${rawSections.length} Sections)_\n\n---\n\n`;
 
+       // Robust Loop: Don't let one failure stop the whole book
        for (let i = 0; i < rawSections.length; i++) {
            const rawText = rawSections[i].trim();
-           // Extract Title (first line) vs Context (rest of the text)
-           const lines = rawText.split('\n');
-           const sectionTitle = lines[0].replace(/^#+\s*/, '').trim();
-           const sectionContext = lines.slice(1).join('\n').trim();
+           
+           try {
+               // Extract Title (first line) vs Context (rest of the text)
+               const lines = rawText.split('\n');
+               const sectionTitle = lines[0].replace(/^#+\s*/, '').trim();
+               const sectionContext = lines.slice(1).join('\n').trim();
 
-           // Skip empty headers or "Introduction" if it's too short, unless it's the only one
-           if (lines.length < 2 && rawSections.length > 3 && sectionTitle.toLowerCase().includes('intro')) {
-               // Optional: Skip bare headers to save tokens, or process them lightly. 
-               // For now, we process everything to be safe.
+               // Skip empty headers or "Introduction" if it's too short
+               if (lines.length < 2 && rawSections.length > 3 && sectionTitle.toLowerCase().includes('intro')) {
+                   // Optional skip logic
+               }
+
+               onProgress(`[Batch ${i+1}/${rawSections.length}] Researching & Writing: "${sectionTitle}"...`);
+               
+               // Generate specific section with internal retry
+               let sectionContent = "";
+               let attempts = 0;
+               while (attempts < 2 && !sectionContent) {
+                   try {
+                       sectionContent = await generateBatchSection(
+                           ai, 
+                           config, 
+                           topic, 
+                           sectionTitle, 
+                           sectionContext || "Cover all standard aspects of this sub-topic.", 
+                           files
+                       );
+                   } catch (err) {
+                       attempts++;
+                       console.warn(`Batch attempt ${attempts} failed for ${sectionTitle}`, err);
+                       await new Promise(r => setTimeout(r, 2000)); // Wait before retry
+                   }
+               }
+               
+               if (!sectionContent) sectionContent = "> [!danger] GENERATION FAILED FOR THIS SECTION.";
+
+               // Append with a clear divider
+               fullContent += `\n# ${sectionTitle}\n\n${sectionContent}\n\n`;
+               
+               // Rate Limit Buffer
+               await new Promise(r => setTimeout(r, 1500));
+
+           } catch (batchError) {
+               console.error(`Error processing batch ${i}:`, batchError);
+               fullContent += `\n> [!warning] Skipped Section due to error.\n\n`;
            }
-
-           onProgress(`[Batch ${i+1}/${rawSections.length}] Researching & Writing: "${sectionTitle}"...`);
-           
-           // Generate specific section
-           const sectionContent = await generateBatchSection(
-               ai, 
-               config, 
-               topic, 
-               sectionTitle, 
-               sectionContext || "Cover all standard aspects of this sub-topic.", 
-               files
-           );
-           
-           // Append with a clear divider
-           fullContent += `\n# ${sectionTitle}\n\n${sectionContent}\n\n`;
-           
-           // Rate Limit Buffer
-           await new Promise(r => setTimeout(r, 1500));
        }
 
        onProgress("Finalizing & Formatting Textbook...");

@@ -40,20 +40,25 @@ const sanitizeNodeLabels = (line: string): string => {
 
   let fixed = line;
 
-  // Helper to format content strictly: "'Content'"
+  // Helper to format content strictly: "Content"
+  // FIX: Idempotent quote handling. If it has quotes, strip them and re-add single pair.
   const formatContent = (content: string) => {
     let raw = content.trim();
-    // Strip existing outer quotes
-    if ((raw.startsWith('"') && raw.endsWith('"')) || (raw.startsWith("'") && raw.endsWith("'"))) {
+    
+    // Remove ALL outer quotes (single or double) recursively to handle "''text''"
+    while ((raw.startsWith('"') && raw.endsWith('"')) || (raw.startsWith("'") && raw.endsWith("'"))) {
       raw = raw.slice(1, -1);
     }
+    
     // Remove internal quotes to prevent breakage
     const safe = raw.replace(/['"]/g, "");
-    return `"'${safe}'"`;
+    return `"${safe}"`; // Always return double quotes for Mermaid compliance
   };
 
   // APPLY REPLACEMENTS IN SPECIFIC ORDER (Longer patterns first)
-  // This prevents '([' from being matched as '('
+  
+  // 0. Circle: id((content)) - MUST BE BEFORE ROUND `()`
+  fixed = fixed.replace(/([a-zA-Z0-9_]+)\s*\(\((.*?)\)\)/g, (m, id, c) => `${id}((${formatContent(c)}))`);
 
   // 1. Stadium: id([content])
   fixed = fixed.replace(/([a-zA-Z0-9_]+)\s*\(\[(.*?)\]\)/g, (m, id, c) => `${id}([${formatContent(c)}])`);
@@ -71,7 +76,6 @@ const sanitizeNodeLabels = (line: string): string => {
   fixed = fixed.replace(/([a-zA-Z0-9_]+)\s*\>(.*?)\]/g, (m, id, c) => `${id}>${formatContent(c)}]`);
 
   // 6. Standard Square: id[content]
-  // Note: We use a non-greedy match. This handles `id[Text (Detail)]` correctly because `]` terminates it.
   fixed = fixed.replace(/([a-zA-Z0-9_]+)\s*\[(.*?)\]/g, (m, id, c) => `${id}[${formatContent(c)}]`);
 
   // 7. Standard Round: id(content)
