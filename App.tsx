@@ -1,6 +1,6 @@
 
 import React, { useState, useEffect, Suspense } from 'react';
-import { BrainCircuit, Settings2, Sparkles, BookOpen, Layers, Zap, AlertCircle, X, Key, GraduationCap, Microscope, Puzzle, Database, HardDrive, Cloud, Layout, Activity, FlaskConical, ListChecks, Bell, HelpCircle, Copy, Check, ShieldCheck, Cpu, Unlock, Download, RefreshCw, User, Lock, Server, PenTool, Wand2, ChevronRight, FileText, FolderOpen, Trash2, CheckCircle2, Circle, Command, Bot, Maximize2, Home, Projector, Minimize2, Component, Save, BookTemplate, ChevronDown, ChevronUp, MessageSquarePlus, Library, Palette, Sun, Moon, Coffee } from 'lucide-react';
+import { BrainCircuit, Settings2, Sparkles, BookOpen, Layers, Zap, AlertCircle, X, Key, GraduationCap, Microscope, Puzzle, Database, HardDrive, Cloud, Layout, Activity, FlaskConical, ListChecks, Bell, HelpCircle, Copy, Check, ShieldCheck, Cpu, Unlock, Download, RefreshCw, User, Lock, Server, PenTool, Wand2, ChevronRight, FileText, FolderOpen, Trash2, CheckCircle2, Circle, Command, Bot, Maximize2, Home, Projector, Minimize2, Component, Save, BookTemplate, ChevronDown, ChevronUp, MessageSquarePlus, Library, Palette, Sun, Moon, Coffee, Network } from 'lucide-react';
 import { AppModel, AppState, NoteData, GenerationConfig, MODE_STRUCTURES, NoteMode, HistoryItem, AIProvider, StorageType, AppView, EncryptedPayload, SavedPrompt, AppTheme } from './types';
 import { generateNoteContent, generateDetailedStructure } from './services/geminiService';
 import { generateNoteContentGroq, getAvailableGroqModels, generateDetailedStructureGroq } from './services/groqService';
@@ -14,9 +14,9 @@ import NeuralVault from './components/NeuralVault';
 import CommandPalette from './components/CommandPalette';
 
 // LAZY LOAD OPTIMIZATION:
-const GraphView = React.lazy(() => import('./components/GraphView'));
 const OutputDisplay = React.lazy(() => import('./components/OutputDisplay'));
 const AdminPanel = React.lazy(() => import('./components/AdminPanel'));
+const GraphView = React.lazy(() => import('./components/GraphView'));
 
 // ... (Constants omitted for brevity, logic remains same)
 const SUPABASE_SETUP_SQL = `
@@ -51,6 +51,7 @@ const GEMINI_MODELS = [
 const INITIAL_GROQ_MODELS = [
   { value: AppModel.GROQ_LLAMA_4_MAVERICK_17B, label: 'Llama 4 Maverick 17B', badge: 'New' },
   { value: AppModel.GROQ_LLAMA_3_3_70B, label: 'Llama 3.3 70B', badge: 'Versatile' },
+  { value: AppModel.GROQ_LLAMA_3_1_8B, label: 'Llama 3.1 8B', badge: 'Fastest' },
   { value: AppModel.GROQ_MIXTRAL_8X7B, label: 'Mixtral 8x7B', badge: 'Logic' },
   { value: AppModel.GROQ_GEMMA2_9B, label: 'Gemma 2 9B', badge: 'Google' },
 ];
@@ -317,7 +318,7 @@ const App: React.FC = () => {
                   {[
                       { v: AppView.WORKSPACE, label: 'Main Menu', icon: Home },
                       { v: AppView.ARCHIVE, label: 'Neural Vault', icon: Cloud },
-                      { v: AppView.GRAPH, label: 'Synapse Graph', icon: Maximize2 }
+                      { v: AppView.GRAPH, label: 'Synapse Graph', icon: Network } // Added Graph Button
                   ].map(btn => (
                       <button key={btn.label} onClick={() => setView(btn.v)} className={`w-full flex items-center gap-3 p-2 rounded-lg hover:bg-[var(--ui-bg)] text-[var(--ui-text-muted)] hover:text-[var(--ui-text-main)] transition-colors ${appState.currentView === btn.v ? 'bg-[var(--ui-bg)] font-bold text-[var(--ui-text-main)] border border-[var(--ui-border)]' : ''}`}>
                           <btn.icon size={16} className={appState.currentView === btn.v ? 'text-[var(--ui-primary)]' : ''}/> <span className="text-xs">{btn.label}</span>
@@ -357,15 +358,21 @@ const App: React.FC = () => {
            </button>
         )}
 
-        <div className={`relative z-10 flex-1 flex flex-col h-full ${appState.currentView === AppView.GRAPH ? 'p-0 overflow-hidden' : 'p-4 md:p-8 lg:p-10 overflow-y-auto custom-scrollbar'} ${focusMode ? 'px-[15%] pt-10' : 'pb-20 md:pb-10'}`}>
+        <div className={`relative z-10 flex-1 flex flex-col h-full ${'p-4 md:p-8 lg:p-10 overflow-y-auto custom-scrollbar'} ${focusMode ? 'px-[15%] pt-10' : 'pb-20 md:pb-10'}`}>
           
-          {appState.currentView !== AppView.GRAPH && !focusMode && (
+          {!focusMode && (
             <div className="flex justify-between items-start mb-6 shrink-0">
                <div>
                   <h2 className="text-2xl md:text-3xl font-bold text-[var(--ui-text-main)] tracking-tight flex items-center gap-3">
                      {appState.currentView === AppView.SYLLABUS ? <ListChecks className="text-[var(--ui-primary)]"/> : 
-                      appState.currentView === AppView.ARCHIVE ? <Cloud className="text-[var(--ui-primary)]"/> : <Sparkles className="text-[var(--ui-primary)]"/>}
-                     {appState.currentView === AppView.SYLLABUS ? 'Syllabus Manager' : appState.currentView === AppView.ARCHIVE ? 'Neural Vault' : 'Workspace'}
+                      appState.currentView === AppView.ARCHIVE ? <Cloud className="text-[var(--ui-primary)]"/> : 
+                      appState.currentView === AppView.GRAPH ? <Network className="text-[var(--ui-primary)]"/> :
+                      <Sparkles className="text-[var(--ui-primary)]"/>}
+                     
+                     {appState.currentView === AppView.SYLLABUS ? 'Syllabus Manager' : 
+                      appState.currentView === AppView.ARCHIVE ? 'Neural Vault' : 
+                      appState.currentView === AppView.GRAPH ? 'Synapse Graph' :
+                      'Workspace'}
                   </h2>
                   <p className="text-[var(--ui-text-muted)] text-sm mt-1 font-medium">
                     {appState.generatedContent ? `Editing: ${noteData.topic}` : 'Medical Knowledge Generator'}
@@ -397,10 +404,18 @@ const App: React.FC = () => {
           {appState.isLoading && <div className="flex flex-col items-center justify-center flex-1 space-y-6 animate-fade-in pb-20 text-[var(--ui-text-muted)]"><div className="w-16 h-16 border-4 border-[var(--ui-border)] rounded-full border-t-[var(--ui-primary)] animate-spin"></div><p>Processing...</p></div>}
 
           {/* VIEWS */}
-          {!appState.isLoading && appState.currentView === AppView.GRAPH && <Suspense fallback={<div>Loading Graph...</div>}><div className="flex-1 animate-fade-in h-full w-full"><GraphView onSelectNote={handleSelectNoteFromFileSystem} /></div></Suspense>}
           
           {!appState.isLoading && appState.currentView === AppView.ARCHIVE && <div className="flex-1 animate-slide-up h-full flex flex-col"><NeuralVault onSelectNote={handleSelectNoteFromFileSystem} onImportCloud={handleRetrieveFromCloud} /></div>}
           
+          {/* GRAPH VIEW */}
+          {!appState.isLoading && appState.currentView === AppView.GRAPH && (
+             <div className="flex-1 animate-slide-up h-full flex flex-col overflow-hidden relative border border-[var(--ui-border)] rounded-xl shadow-inner bg-[var(--ui-bg)]">
+                <Suspense fallback={<div className="flex items-center justify-center h-full text-[var(--ui-text-muted)]">Loading Neural Graph...</div>}>
+                   <GraphView onSelectNote={handleSelectNoteFromFileSystem} />
+                </Suspense>
+             </div>
+          )}
+
           {!appState.isLoading && appState.generatedContent && (
              <div className="flex-1 animate-slide-up h-full">
                <Suspense fallback={<div>Loading Editor...</div>}>

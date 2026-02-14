@@ -51,7 +51,7 @@
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800;900&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
     <style>
       body {
-        background-color: #f8fafc; /* Fallback */
+        background-color: #f8fafc;
         margin: 0;
         font-family: 'Inter', sans-serif;
         -webkit-font-smoothing: antialiased;
@@ -72,19 +72,17 @@
          GLOBAL THEME SYSTEM (UI + MARKDOWN)
          ============================================================ */
 
-      /* 1. CLINICAL CLEAN (New Default - Light & Professional) */
+      /* 1. CLINICAL CLEAN (Default) */
       .theme-clinical_clean {
-        /* UI Colors */
         --ui-bg: #ffffff;
-        --ui-sidebar: #f8fafc; /* Slate 50 */
-        --ui-border: #e2e8f0;  /* Slate 200 */
-        --ui-text-main: #0f172a; /* Slate 900 */
-        --ui-text-muted: #64748b; /* Slate 500 */
-        --ui-primary: #2563eb; /* Royal Blue */
+        --ui-sidebar: #f8fafc;
+        --ui-border: #e2e8f0;
+        --ui-text-main: #0f172a;
+        --ui-text-muted: #64748b;
+        --ui-primary: #2563eb;
         --ui-primary-glow: rgba(37, 99, 235, 0.08);
         --ui-surface: #ffffff;
         
-        /* Markdown Colors */
         --md-bg: #ffffff;
         --md-text: #334155;
         --md-heading: #1e293b;
@@ -95,16 +93,10 @@
         --md-table-head: #f8fafc;
         --md-table-stripe: #f8fafc;
         --md-callout-bg: #f8fafc;
-        
-        /* Mermaid */
-        --mermaid-line: #334155 !important;
-        --mermaid-fill: #ffffff !important;
-        --mermaid-text: #0f172a !important;
       }
 
-      /* 2. ACADEMIC PAPER (Classic Serif/Mono feel) */
+      /* 2. ACADEMIC PAPER */
       .theme-academic_paper {
-        /* UI Colors */
         --ui-bg: #fdfdfd; 
         --ui-sidebar: #f4f4f5;
         --ui-border: #d4d4d8; 
@@ -114,7 +106,6 @@
         --ui-primary-glow: rgba(0, 0, 0, 0.05);
         --ui-surface: #ffffff;
 
-        /* Markdown Colors */
         --md-bg: #ffffff;
         --md-text: #27272a;
         --md-heading: #000000;
@@ -125,18 +116,12 @@
         --md-table-head: #fafafa;
         --md-table-stripe: #fafafa;
         --md-callout-bg: #fafafa;
-
-        /* Mermaid */
-        --mermaid-line: #000000 !important;
-        --mermaid-fill: #ffffff !important;
-        --mermaid-text: #000000 !important;
       }
 
-      /* 3. SEPIA FOCUS (Warm, Eye-Care) */
+      /* 3. SEPIA FOCUS */
       .theme-sepia_focus {
-        /* UI Colors */
-        --ui-bg: #fdf6e3; /* Solarized Base3 */
-        --ui-sidebar: #eee8d5; /* Solarized Base2 */
+        --ui-bg: #fdf6e3;
+        --ui-sidebar: #eee8d5;
         --ui-border: #d3cbb7;
         --ui-text-main: #5f4b32;
         --ui-text-muted: #93a1a1;
@@ -144,7 +129,6 @@
         --ui-primary-glow: rgba(181, 137, 0, 0.1);
         --ui-surface: #eee8d5;
 
-        /* Markdown Colors */
         --md-bg: #fdf6e3;
         --md-text: #5f4b32;
         --md-heading: #3e2d1e;
@@ -155,16 +139,11 @@
         --md-table-head: #eee8d5;
         --md-table-stripe: #fcf5e6;
         --md-callout-bg: rgba(0,0,0,0.03);
-
-        /* Mermaid */
-        --mermaid-line: #5f4b32 !important;
-        --mermaid-fill: #fdf6e3 !important;
-        --mermaid-text: #3e2d1e !important;
       }
 
 
       /* ============================================================
-         CORE STYLES USING VARIABLES
+         CORE STYLES
          ============================================================ */
 
       .markdown-body {
@@ -177,10 +156,8 @@
         border: 1px solid var(--md-border);
         box-shadow: 0 4px 20px rgba(0,0,0,0.02);
         isolation: isolate;
-        transition: background-color 0.3s ease, color 0.3s ease;
       }
 
-      /* Consistent Heading Sizes */
       .markdown-body h1 { color: var(--md-heading) !important; font-size: 2.25em !important; font-weight: 800 !important; border-bottom: 2px solid var(--md-border); padding-bottom: 15px; margin-bottom: 30px; letter-spacing: -0.02em; }
       .markdown-body h2 { color: var(--md-heading) !important; font-size: 1.5em !important; font-weight: 700 !important; margin-top: 35px; margin-bottom: 15px; padding-left: 12px; border-left: 4px solid var(--md-accent); }
       .markdown-body h3 { color: var(--md-accent) !important; font-size: 1.15em !important; font-weight: 600 !important; margin-top: 25px; }
@@ -188,7 +165,7 @@
       .markdown-body strong { font-weight: 700; color: var(--md-heading) !important; background-color: var(--ui-primary-glow); padding: 0 3px; border-radius: 4px; }
       .markdown-body hr { border: none; border-bottom: 1px solid var(--md-border); margin: 30px 0; }
 
-      /* --- MODERN CALLOUTS --- */
+      /* CALLOUTS */
       .markdown-body .callout { 
         background-color: var(--md-callout-bg) !important; 
         border: 1px solid var(--md-border) !important; 
@@ -196,8 +173,6 @@
         border-radius: 8px !important; 
         margin: 20px 0 !important; 
         overflow: hidden;
-        backdrop-filter: blur(5px);
-        box-shadow: 0 2px 10px rgba(0,0,0,0.02);
       }
       .markdown-body .callout-title { 
         font-weight: 700 !important; 
@@ -213,59 +188,113 @@
       }
       .markdown-body .callout-content { padding: 14px 18px; font-size: 0.95em; }
       
-      /* Specific Types */
       .callout-info { border-left-color: var(--md-accent) !important; }
-      .callout-info .callout-title { color: var(--md-accent) !important; background: linear-gradient(90deg, rgba(99,102,241,0.05), transparent); }
-
+      .callout-info .callout-title { color: var(--md-accent) !important; }
       .callout-abstract { border-left-color: #f59e0b !important; }
-      .callout-abstract .callout-title { color: #f59e0b !important; background: linear-gradient(90deg, rgba(245,158,11,0.05), transparent); }
-
+      .callout-abstract .callout-title { color: #f59e0b !important; }
       .callout-tip { border-left-color: #10b981 !important; }
-      .callout-tip .callout-title { color: #10b981 !important; background: linear-gradient(90deg, rgba(16,185,129,0.05), transparent); }
-
+      .callout-tip .callout-title { color: #10b981 !important; }
       .callout-danger { border-left-color: #ef4444 !important; }
-      .callout-danger .callout-title { color: #ef4444 !important; background: linear-gradient(90deg, rgba(239,68,68,0.05), transparent); }
-
+      .callout-danger .callout-title { color: #ef4444 !important; }
       .callout-question { border-left-color: #8b5cf6 !important; }
-      .callout-question .callout-title { color: #8b5cf6 !important; background: linear-gradient(90deg, rgba(139,92,246,0.05), transparent); }
-
+      .callout-question .callout-title { color: #8b5cf6 !important; }
       .callout-example { border-left-color: #06b6d4 !important; }
-      .callout-example .callout-title { color: #06b6d4 !important; background: linear-gradient(90deg, rgba(6,182,212,0.05), transparent); }
-
+      .callout-example .callout-title { color: #06b6d4 !important; }
       .callout-quote { border-left-color: #64748b !important; font-style: italic; }
       .callout-quote .callout-title { color: #94a3b8 !important; }
 
-      /* Tables */
       .markdown-body table { width: 100%; border-collapse: collapse; margin: 20px 0; font-size: 0.95em; border: 1px solid var(--md-border); }
       .markdown-body th { background-color: var(--md-table-head) !important; color: var(--md-heading) !important; font-weight: 600; padding: 12px; border-bottom: 2px solid var(--md-border); text-align: left; }
       .markdown-body td { border-bottom: 1px solid var(--md-border); padding: 10px 12px; color: var(--md-text) !important; }
       .markdown-body tr:nth-child(even) td { background-color: var(--md-table-stripe) !important; }
 
-      /* Code */
       .markdown-body code { background-color: var(--md-code-bg); color: var(--md-accent); padding: 0.2em 0.4em; border-radius: 4px; font-size: 85%; }
       .markdown-body pre code { background-color: transparent; color: inherit; padding: 0; }
-
-      /* Images */
       .markdown-body img { display: block; margin: 20px auto; border-radius: 6px; border: 1px solid var(--md-border); max-width: 100%; }
 
-      /* Mermaid */
-      .mermaid-container { background-color: var(--md-bg) !important; border: 1px solid var(--md-border); border-radius: 8px; margin: 25px 0; overflow: visible; display: block; }
-      /* FORCE SVG TO NOT SHRINK */
-      .mermaid svg { font-family: 'Inter', sans-serif !important; max-width: none !important; height: auto !important; }
-      .node rect, .node circle, .node polygon, .node path { fill: var(--md-bg) !important; stroke: var(--mermaid-line) !important; stroke-width: 1.5px !important; }
-      .node .label { color: var(--mermaid-text) !important; }
-      .edgePath .path { stroke: var(--mermaid-line) !important; stroke-width: 1.5px !important; }
-      .marker { fill: var(--mermaid-line) !important; stroke: var(--mermaid-line) !important; }
-      .flowchart-link { stroke: var(--mermaid-line) !important; }
-      .mermaid text, .mermaid tspan { fill: var(--mermaid-text) !important; font-family: 'Inter', sans-serif !important; }
+      /* 
+         ========================================================================
+         NUCLEAR OPTION FOR MERMAID VISIBILITY (FIXED)
+         Forces high contrast (Black on White) regardless of parent theme.
+         ========================================================================
+      */
+      
+      /* MATCHING CLASS NAME WITH REACT COMPONENT */
+      .mermaid-container {
+        background-color: #ffffff !important;
+        border: 1px solid #e2e8f0;
+        border-radius: 8px;
+        margin: 25px 0;
+        padding: 20px;
+        overflow: auto;
+        display: block;
+        box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.05);
+      }
 
-      /* Sensor Mode */
+      /* 1. CONTAINER & SCALING */
+      .mermaid-container svg { 
+        font-family: 'Inter', sans-serif !important; 
+        max-width: none !important; 
+        min-width: 100% !important;
+        height: auto !important; 
+        background-color: transparent !important;
+      }
+
+      /* 2. TEXT - Force Black */
+      .mermaid-container .nodeLabel, 
+      .mermaid-container .edgeLabel, 
+      .mermaid-container .label, 
+      .mermaid-container text, 
+      .mermaid-container tspan, 
+      .mermaid-container div,
+      .mermaid-container span,
+      .mermaid-container p,
+      .mermaid-container g.mindmap-node text,
+      .mermaid-container .node foreignObject div { 
+        color: #000000 !important; 
+        fill: #000000 !important;
+        font-family: 'Inter', sans-serif !important; 
+        font-size: 14px !important;
+        line-height: 1.5 !important;
+      }
+
+      /* 3. SHAPES - White Fill, Black Stroke */
+      .mermaid-container .node rect, 
+      .mermaid-container .node circle, 
+      .mermaid-container .node polygon, 
+      .mermaid-container .node path, 
+      .mermaid-container .node ellipse,
+      .mermaid-container g.mindmap-node rect,
+      .mermaid-container g.mindmap-node path,
+      .mermaid-container rect.actor { 
+        fill: #ffffff !important; 
+        stroke: #000000 !important; 
+        stroke-width: 2px !important; 
+      }
+
+      /* 4. LINES - Black */
+      .mermaid-container .edgePath .path, 
+      .mermaid-container .flowchart-link, 
+      .mermaid-container .link,
+      .mermaid-container .actor-line,
+      .mermaid-container .messageLine0,
+      .mermaid-container .messageLine1 { 
+        stroke: #000000 !important; 
+        stroke-width: 2px !important; 
+        fill: none !important;
+      }
+      
+      /* 5. ARROWHEADS - Black */
+      .mermaid-container .marker, 
+      .mermaid-container #arrowhead path { 
+        fill: #000000 !important; 
+        stroke: #000000 !important; 
+      }
+
       .sensor-blur { filter: blur(5px); opacity: 0.7; background: var(--md-code-bg); cursor: pointer; transition: all 0.2s ease; border-radius: 4px; }
       .sensor-blur:hover { opacity: 0.9; background: var(--md-border); }
 
-      /* Mobile */
       @media (max-width: 640px) { .markdown-body { padding: 20px; } .markdown-body h1 { font-size: 1.75em !important; } }
-
     </style>
   <script type="importmap">
 {

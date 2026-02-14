@@ -57,7 +57,6 @@ const CommandPalette: React.FC<CommandPaletteProps> = ({
       { id: 'nav-workspace', group: 'Navigation', label: 'Go to Workspace', icon: <Sparkles size={14}/>, action: () => onNavigate(AppView.WORKSPACE) },
       { id: 'nav-syllabus', group: 'Navigation', label: 'Go to Syllabus Manager', icon: <Layout size={14}/>, action: () => onNavigate(AppView.SYLLABUS) },
       { id: 'nav-vault', group: 'Navigation', label: 'Go to Neural Vault', icon: <FileText size={14}/>, action: () => onNavigate(AppView.ARCHIVE) },
-      { id: 'nav-graph', group: 'Navigation', label: 'Go to Synapse Graph', icon: <BrainCircuit size={14}/>, action: () => onNavigate(AppView.GRAPH) },
       
       // Actions
       { id: 'act-focus', group: 'Actions', label: isFocusMode ? 'Exit Focus Mode' : 'Enter Focus Mode (Zen)', icon: <Maximize2 size={14}/>, shortcut: 'F', action: toggleFocusMode },
