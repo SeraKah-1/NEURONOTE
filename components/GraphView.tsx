@@ -1,526 +1,400 @@
 
-import React, { useEffect, useRef, useState, useMemo, useCallback } from 'react';
+import React, { useEffect, useState, useMemo, useCallback, useRef } from 'react';
 import { HistoryItem, NoteMode } from '../types';
 import { StorageService } from '../services/storageService';
-import { ZoomIn, ZoomOut, RefreshCw, Maximize2, Search, Filter, Trash2, FileText, X, Share2, Focus, GripHorizontal, BrainCircuit } from 'lucide-react';
+import { 
+  Network, Search, ArrowRight, 
+  Database, FileText, Zap, GraduationCap, PenTool, Library, Link2, Settings2, Unlock, Lock,
+  Target, Crosshair, Activity, Scan
+} from 'lucide-react';
 
 interface GraphViewProps {
   onSelectNote: (note: HistoryItem) => void;
 }
 
-interface Node {
-  id: string;
-  x: number;
-  y: number;
-  vx: number;
-  vy: number;
-  radius: number;
-  color: string;
-  label: string;
-  data: HistoryItem;
-}
+// --- LIGHTWEIGHT SIMILARITY ENGINE ---
+const computeSimilarity = (a: HistoryItem, b: HistoryItem): number => {
+    if (a.id === b.id) return 1;
+    const tagsA = new Set(a.tags || []);
+    const tagsB = new Set(b.tags || []);
+    const intersection = new Set([...tagsA].filter(x => tagsB.has(x)));
+    const union = new Set([...tagsA, ...tagsB]);
+    const tagScore = union.size === 0 ? 0 : intersection.size / union.size;
 
-interface Link {
-  source: string;
-  target: string;
-  sourceNode?: Node;
-  targetNode?: Node;
-  strength: number;
-}
+    const tokenize = (str: string) => new Set(str.toLowerCase().split(/\s+/).filter(w => w.length > 3));
+    const titleA = tokenize(a.topic);
+    const titleB = tokenize(b.topic);
+    const titleIntersect = new Set([...titleA].filter(x => titleB.has(x)));
+    const titleScore = titleA.size === 0 ? 0 : titleIntersect.size / titleA.size;
 
-// Utility: Consistent color generation based on string
-const stringToColor = (str: string) => {
-  let hash = 0;
-  for (let i = 0; i < str.length; i++) hash = str.charCodeAt(i) + ((hash << 5) - hash);
-  const h = Math.abs(hash % 360);
-  return `hsl(${h}, 70%, 50%)`; // HSL for better control in Light/Dark modes
+    return (tagScore * 0.7) + (titleScore * 0.3);
 };
 
-const GraphView: React.FC<GraphViewProps> = ({ onSelectNote }) => {
-  const canvasRef = useRef<HTMLCanvasElement>(null);
-  const containerRef = useRef<HTMLDivElement>(null);
-  
-  // UX State
-  const [searchQuery, setSearchQuery] = useState('');
-  const [contextMenu, setContextMenu] = useState<{x: number, y: number, node: Node} | null>(null);
-  const [spotlightNode, setSpotlightNode] = useState<string | null>(null); // ID of focused node
-  const [hasData, setHasData] = useState(false); // Empty state tracker
+const getModeColor = (mode: NoteMode) => {
+  switch (mode) {
+    case NoteMode.CHEAT_CODES: return { bg: 'bg-amber-500', border: 'border-amber-400', glow: 'shadow-amber-500/50', text: 'text-amber-400', ring: 'ring-amber-500' };
+    case NoteMode.COMPREHENSIVE: return { bg: 'bg-emerald-600', border: 'border-emerald-400', glow: 'shadow-emerald-500/50', text: 'text-emerald-400', ring: 'ring-emerald-500' };
+    case NoteMode.CUSTOM: return { bg: 'bg-pink-600', border: 'border-pink-400', glow: 'shadow-pink-500/50', text: 'text-pink-400', ring: 'ring-pink-500' };
+    default: return { bg: 'bg-indigo-600', border: 'border-indigo-400', glow: 'shadow-indigo-500/50', text: 'text-indigo-400', ring: 'ring-indigo-500' };
+  }
+};
 
-  // Physics State
-  const nodesRef = useRef<Node[]>([]);
-  const linksRef = useRef<Link[]>([]);
-  const [transform, setTransform] = useState({ x: 0, y: 0, k: 0.8 }); // Pan/Zoom
-  
-  // Interaction Refs
-  const isDragging = useRef(false);
-  const dragNode = useRef<Node | null>(null);
-  const dragStartPos = useRef({ x: 0, y: 0 });
-  
-  // Touch Refs (Pinch Zoom)
-  const lastTouchDistance = useRef<number | null>(null);
-  
-  const animationRef = useRef<number>(0);
-  const storage = useMemo(() => StorageService.getInstance(), []);
+const getModeIcon = (mode: NoteMode) => {
+  switch (mode) {
+    case NoteMode.CHEAT_CODES: return <Zap size={14} />;
+    case NoteMode.COMPREHENSIVE: return <Library size={14} />;
+    case NoteMode.CUSTOM: return <PenTool size={14} />;
+    default: return <GraduationCap size={14} />;
+  }
+};
 
-  // --- 1. DATA LOADING & TOPOLOGY ---
+const getOrbitPosition = (index: number, total: number, radius: number) => {
+  const angle = (index / total) * 2 * Math.PI - (Math.PI / 2);
+  return { x: Math.cos(angle) * radius, y: Math.sin(angle) * radius };
+};
+
+const NeuralLattice: React.FC<GraphViewProps> = ({ onSelectNote }) => {
+  const [notes, setNotes] = useState<HistoryItem[]>([]);
+  const [centerId, setCenterId] = useState<string | null>(null);
+  const [search, setSearch] = useState('');
+  const [loading, setLoading] = useState(true);
+  const [hoveredNode, setHoveredNode] = useState<HistoryItem | null>(null);
+  const [isTransitioning, setIsTransitioning] = useState(false); // UX FEEL: Warp State
+  
+  // UX Settings
+  const [threshold, setThreshold] = useState(0.2); 
+  const [autoConnect, setAutoConnect] = useState(true);
+  const [maxOrbits, setMaxOrbits] = useState(8);
+
+  const storage = StorageService.getInstance();
+
   const loadData = useCallback(async () => {
-    const data = await storage.getUnifiedNotes();
-    initSimulation(data);
-  }, [storage]);
-
-  useEffect(() => {
-    loadData();
-    const handleResize = () => {
-      if (containerRef.current && canvasRef.current) {
-        // High DPI scaling for crisp text on mobile
-        const dpr = window.devicePixelRatio || 1;
-        const rect = containerRef.current.getBoundingClientRect();
-        
-        canvasRef.current.width = rect.width * dpr;
-        canvasRef.current.height = rect.height * dpr;
-        canvasRef.current.style.width = `${rect.width}px`;
-        canvasRef.current.style.height = `${rect.height}px`;
-        
-        // Center initial view if transform hasn't been set
-        if (transform.x === 0 && transform.y === 0) {
-            setTransform(prev => ({ ...prev, x: rect.width / 2, y: rect.height / 2 }));
-        }
+      setLoading(true);
+      const data = await storage.getUnifiedNotes();
+      const sorted = data.sort((a, b) => b.timestamp - a.timestamp);
+      setNotes(sorted);
+      if (sorted.length > 0 && !centerId) {
+        setCenterId(sorted[0].id);
       }
-    };
-    window.addEventListener('resize', handleResize);
-    // Delay initial resize slightly to allow container layout to settle
-    setTimeout(handleResize, 100); 
+      setLoading(false);
+  }, [centerId, storage]);
+
+  useEffect(() => { loadData(); }, []);
+
+  // --- CONNECTIVITY LOGIC ---
+  const { centerNode, satellites, otherNodes, connections } = useMemo(() => {
+    if (!centerId || notes.length === 0) return { centerNode: null, satellites: [], otherNodes: [], connections: [] };
+
+    const center = notes.find(n => n.id === centerId) || notes[0];
     
-    return () => {
-      window.removeEventListener('resize', handleResize);
-      cancelAnimationFrame(animationRef.current);
-    };
-  }, [loadData]);
+    const scoredNodes = notes
+        .filter(n => n.id !== center.id)
+        .map(n => {
+            const similarity = computeSimilarity(center, n);
+            const isManuallyLinked = n.tags?.some(t => center.tags?.includes(t)) || false;
+            const finalScore = isManuallyLinked ? 1.1 : similarity;
+            return { node: n, score: finalScore, isManual: isManuallyLinked };
+        });
 
-  const initSimulation = (items: HistoryItem[]) => {
-    // Note: We don't return early even if empty, so the canvas loop still runs (drawing grid)
-    if (items.length === 0) {
-        setHasData(false);
-        nodesRef.current = [];
-        linksRef.current = [];
-        return;
-    }
-    setHasData(true);
+    const orbitCandidates = scoredNodes
+        .filter(item => {
+            const matchesSearch = search ? item.node.topic.toLowerCase().includes(search.toLowerCase()) : true;
+            const passesThreshold = autoConnect ? item.score >= threshold : item.isManual;
+            return matchesSearch && passesThreshold;
+        })
+        .sort((a, b) => b.score - a.score)
+        .slice(0, maxOrbits);
 
-    if (!containerRef.current) return;
-    const width = containerRef.current.clientWidth;
-    const height = containerRef.current.clientHeight;
-
-    const existingNodesMap = new Map<string, Node>();
-    nodesRef.current.forEach(n => existingNodesMap.set(n.id, n));
+    const satelliteNodes = orbitCandidates.map(i => i.node);
     
-    const newNodes: Node[] = items.map(item => {
-      const existing = existingNodesMap.get(item.id);
-      // Auto-color based on Tags or Mode
-      let nodeColor = item.mode === NoteMode.CHEAT_CODES ? '#f59e0b' : '#3b82f6';
-      if (item.tags && item.tags.length > 0) nodeColor = stringToColor(item.tags[0]);
+    const edges = orbitCandidates.map(item => ({
+        targetId: item.node.id,
+        type: item.isManual ? 'manual' : 'auto',
+        strength: item.score
+    }));
 
-      return {
-        id: item.id,
-        x: existing ? existing.x : (Math.random() - 0.5) * width * 0.2,
-        y: existing ? existing.y : (Math.random() - 0.5) * height * 0.2,
-        vx: existing ? existing.vx : 0,
-        vy: existing ? existing.vy : 0,
-        radius: Math.max(15, Math.min(40, 15 + (item.tags?.length || 0) * 3)), // Larger tap targets for mobile
-        color: nodeColor, 
-        label: item.topic,
-        data: item,
-      };
-    });
+    const others = notes.filter(n => 
+      n.id !== center.id && 
+      !satelliteNodes.find(s => s.id === n.id) &&
+      (search ? n.topic.toLowerCase().includes(search.toLowerCase()) : true)
+    );
 
-    const newLinks: Link[] = [];
-    for (let i = 0; i < newNodes.length; i++) {
-      for (let j = i + 1; j < newNodes.length; j++) {
-        const a = newNodes[i];
-        const b = newNodes[j];
-        
-        // Link Logic: Shared Tags OR Reference in Text
-        const sharedTags = (a.data.tags || []).filter(t => (b.data.tags || []).includes(t));
-        const refLink = a.data.content.includes(b.data.topic) || b.data.content.includes(a.data.topic);
+    return { centerNode: center, satellites: satelliteNodes, otherNodes: others, connections: edges };
+  }, [notes, centerId, search, threshold, autoConnect, maxOrbits]);
 
-        if (sharedTags.length > 0 || refLink) {
-          newLinks.push({
-            source: a.id,
-            target: b.id,
-            sourceNode: a,
-            targetNode: b,
-            strength: refLink ? 0.8 : 0.2
-          });
-        }
-      }
-    }
-
-    nodesRef.current = newNodes;
-    linksRef.current = newLinks;
-  };
-
-  // --- 2. RENDER LOOP (THEME AWARE) ---
-  useEffect(() => {
-    let isRunning = true;
-
-    // Helper to get CSS Variable from the container (where the theme class lives), NOT body
-    const getVar = (name: string, fallback: string) => {
-        if (!containerRef.current) return fallback;
-        const val = getComputedStyle(containerRef.current).getPropertyValue(name).trim();
-        return val || fallback;
-    };
-
-    const tick = () => {
-      if (!isRunning || !canvasRef.current) return;
-      
-      // Update Physics
-      const nodes = nodesRef.current;
-      const links = linksRef.current;
-      
-      const REPULSION = 1000;
-      const SPRING_LEN = 150;
-      const CENTER_GRAVITY = 0.001; // Weaker gravity for more spread
-      const DT = 0.6;
-
-      for (let i = 0; i < nodes.length; i++) {
-        for (let j = i + 1; j < nodes.length; j++) {
-          const a = nodes[i];
-          const b = nodes[j];
-          const dx = a.x - b.x;
-          const dy = a.y - b.y;
-          const distSq = dx*dx + dy*dy || 1;
-          const dist = Math.sqrt(distSq);
-          if (dist < 800) {
-            const f = REPULSION / distSq;
-            a.vx += (dx/dist)*f; a.vy += (dy/dist)*f;
-            b.vx -= (dx/dist)*f; b.vy -= (dy/dist)*f;
-          }
-        }
-      }
-
-      links.forEach(l => {
-        if (!l.sourceNode || !l.targetNode) return;
-        const dx = l.targetNode.x - l.sourceNode.x;
-        const dy = l.targetNode.y - l.sourceNode.y;
-        const dist = Math.sqrt(dx*dx + dy*dy) || 1;
-        const f = (dist - SPRING_LEN) * 0.02;
-        const fx = (dx/dist)*f; const fy = (dy/dist)*f;
-        l.sourceNode.vx += fx; l.sourceNode.vy += fy;
-        l.targetNode.vx -= fx; l.targetNode.vy -= fy;
-      });
-
-      nodes.forEach(n => {
-        if (n === dragNode.current) return;
-        n.vx -= n.x * CENTER_GRAVITY; n.vy -= n.y * CENTER_GRAVITY;
-        n.vx *= 0.85; n.vy *= 0.85; // Friction
-        n.x += n.vx * DT; n.y += n.vy * DT;
-      });
-
-      // DRAW
-      const ctx = canvasRef.current.getContext('2d');
-      if (!ctx) return;
-      
-      const dpr = window.devicePixelRatio || 1;
-      const width = canvasRef.current.width / dpr;
-      const height = canvasRef.current.height / dpr;
-
-      // Dynamic Theme Colors
-      const bg = getVar('--ui-bg', '#ffffff');
-      const textMain = getVar('--ui-text-main', '#0f172a');
-      const border = getVar('--ui-border', '#e2e8f0');
-
-      // Clear
-      ctx.resetTransform();
-      ctx.scale(dpr, dpr);
-      ctx.clearRect(0, 0, width, height);
-      
-      // Draw Background Grid (To prove canvas is alive)
-      ctx.strokeStyle = border;
-      ctx.lineWidth = 0.5;
-      ctx.globalAlpha = 0.3;
-      const gridSize = 50 * transform.k;
-      const offsetX = transform.x % gridSize;
-      const offsetY = transform.y % gridSize;
-      
-      ctx.beginPath();
-      for (let x = offsetX; x < width; x += gridSize) { ctx.moveTo(x, 0); ctx.lineTo(x, height); }
-      for (let y = offsetY; y < height; y += gridSize) { ctx.moveTo(0, y); ctx.lineTo(width, y); }
-      ctx.stroke();
-      ctx.globalAlpha = 1;
-
-      // Transform Camera
-      ctx.translate(transform.x, transform.y);
-      ctx.scale(transform.k, transform.k);
-
-      // Links
-      links.forEach(l => {
-        if (!l.sourceNode || !l.targetNode) return;
-        const isConnectedToSpotlight = spotlightNode && (l.source === spotlightNode || l.target === spotlightNode);
-        if (spotlightNode && !isConnectedToSpotlight) {
-            ctx.globalAlpha = 0.05;
-        } else {
-            ctx.globalAlpha = 0.2;
-        }
-
-        ctx.beginPath();
-        ctx.moveTo(l.sourceNode.x, l.sourceNode.y);
-        ctx.lineTo(l.targetNode.x, l.targetNode.y);
-        ctx.strokeStyle = textMain;
-        ctx.lineWidth = 1.5;
-        ctx.stroke();
-      });
-
-      // Nodes
-      nodes.forEach(n => {
-        const isMatch = !searchQuery || n.label.toLowerCase().includes(searchQuery.toLowerCase());
-        const isSpotlight = n.id === spotlightNode;
-        const isNeighbor = spotlightNode && links.some(l => (l.source === spotlightNode && l.target === n.id) || (l.target === spotlightNode && l.source === n.id));
-        
-        let alpha = 1;
-        if (searchQuery && !isMatch) alpha = 0.1;
-        if (spotlightNode && !isSpotlight && !isNeighbor) alpha = 0.1;
-
-        ctx.globalAlpha = alpha;
-
-        // Glow
-        if (isSpotlight || (searchQuery && isMatch)) {
-            ctx.shadowColor = n.color;
-            ctx.shadowBlur = 20;
-        } else {
-            ctx.shadowBlur = 0;
-        }
-
-        // Body
-        ctx.beginPath();
-        ctx.arc(n.x, n.y, n.radius, 0, Math.PI * 2);
-        ctx.fillStyle = bg;
-        ctx.fill();
-        ctx.lineWidth = isSpotlight ? 4 : 2;
-        ctx.strokeStyle = n.color;
-        ctx.stroke();
-
-        // Label (LOD)
-        if (transform.k > 0.6 || isSpotlight || isNeighbor || (searchQuery && isMatch)) {
-            ctx.shadowBlur = 0;
-            ctx.font = `bold 12px Inter, sans-serif`;
-            ctx.textAlign = 'center';
-            ctx.textBaseline = 'middle';
-            
-            const textWidth = ctx.measureText(n.label).width;
-            ctx.fillStyle = bg;
-            ctx.globalAlpha = alpha * 0.8;
-            ctx.fillRect(n.x - textWidth/2 - 4, n.y + n.radius + 4, textWidth + 8, 18);
-            
-            ctx.fillStyle = textMain;
-            ctx.globalAlpha = alpha;
-            ctx.fillText(n.label, n.x, n.y + n.radius + 13);
-        }
-      });
-
-      ctx.globalAlpha = 1;
-      animationRef.current = requestAnimationFrame(tick);
-    };
-
-    tick();
-    return () => isRunning = false;
-  }, [transform, spotlightNode, searchQuery]);
-
-  // --- 3. INPUT HANDLERS (TOUCH & MOUSE) ---
-
-  const getPos = (e: React.MouseEvent | React.TouchEvent) => {
-    const canvas = canvasRef.current!;
-    const rect = canvas.getBoundingClientRect();
-    let cx, cy;
+  // --- ACTIONS WITH "FEELS" ---
+  const handleNodeClick = (id: string) => {
+    if (id === centerId) return; // Prevent clicking already active
     
-    if ('touches' in e) {
-       cx = e.touches[0].clientX;
-       cy = e.touches[0].clientY;
-    } else {
-       cx = (e as React.MouseEvent).clientX;
-       cy = (e as React.MouseEvent).clientY;
-    }
+    // 1. Trigger Warp Effect
+    setIsTransitioning(true);
     
-    const x = (cx - rect.left - transform.x) / transform.k;
-    const y = (cy - rect.top - transform.y) / transform.k;
-    return { x, y, cx, cy };
+    // 2. Delay State Change (Allow animation to play)
+    setTimeout(() => {
+        setCenterId(id);
+        setIsTransitioning(false);
+    }, 400); // 400ms match CSS transition
   };
 
-  const getNodeAt = (x: number, y: number) => {
-    for (let i = nodesRef.current.length - 1; i >= 0; i--) {
-      const n = nodesRef.current[i];
-      const dist = Math.sqrt((n.x - x)**2 + (n.y - y)**2);
-      if (dist < n.radius + 10) return n;
-    }
-    return null;
+  const handleToggleLink = async (e: React.MouseEvent, target: HistoryItem) => {
+      e.stopPropagation();
+      if (!centerNode) return;
+      storage.connectNotes(centerNode.id, target.id);
+      loadData();
   };
 
-  const handleStart = (e: React.TouchEvent | React.MouseEvent) => {
-    if (contextMenu) setContextMenu(null);
+  if (loading) return <div className="flex items-center justify-center h-full bg-[#050911] text-gray-500 animate-pulse"><Network size={48}/><span className="ml-3 font-mono">NEURAL SYNC...</span></div>;
+  if (!centerNode) return <div className="flex items-center justify-center h-full bg-[#050911] text-gray-500">Neural Lattice Empty.</div>;
 
-    if ('touches' in e && e.touches.length === 2) {
-       const dx = e.touches[0].clientX - e.touches[1].clientX;
-       const dy = e.touches[0].clientY - e.touches[1].clientY;
-       lastTouchDistance.current = Math.sqrt(dx*dx + dy*dy);
-       return; 
-    }
-
-    const { x, y, cx, cy } = getPos(e);
-    const node = getNodeAt(x, y);
-
-    if (node) {
-       isDragging.current = true;
-       dragNode.current = node;
-       dragStartPos.current = { x: cx, y: cy };
-       setSpotlightNode(node.id);
-    } else {
-       isDragging.current = true;
-       dragNode.current = null;
-       dragStartPos.current = { x: cx, y: cy };
-       if (spotlightNode) setSpotlightNode(null);
-    }
-  };
-
-  const handleMove = (e: React.TouchEvent | React.MouseEvent) => {
-    if ('touches' in e && e.touches.length === 2 && lastTouchDistance.current) {
-        const dx = e.touches[0].clientX - e.touches[1].clientX;
-        const dy = e.touches[0].clientY - e.touches[1].clientY;
-        const dist = Math.sqrt(dx*dx + dy*dy);
-        const delta = dist - lastTouchDistance.current;
-        const zoomSpeed = 0.005;
-        const newK = Math.max(0.2, Math.min(3, transform.k + delta * zoomSpeed));
-        setTransform(prev => ({ ...prev, k: newK }));
-        lastTouchDistance.current = dist;
-        return;
-    }
-
-    if (!isDragging.current) return;
-
-    const { x, y, cx, cy } = getPos(e);
-    const dx = cx - dragStartPos.current.x;
-    const dy = cy - dragStartPos.current.y;
-
-    if (dragNode.current) {
-       dragNode.current.x = x;
-       dragNode.current.y = y;
-       dragNode.current.vx = 0; 
-       dragNode.current.vy = 0;
-    } else {
-       setTransform(prev => ({ ...prev, x: prev.x + dx, y: prev.y + dy }));
-       dragStartPos.current = { x: cx, y: cy };
-    }
-  };
-
-  const handleEnd = (e: React.TouchEvent | React.MouseEvent) => {
-    lastTouchDistance.current = null;
-    isDragging.current = false;
-    dragNode.current = null;
-  };
-
-  const handleContextMenu = (e: React.MouseEvent) => {
-      e.preventDefault();
-      const { x, y } = getPos(e);
-      const node = getNodeAt(x, y);
-      if (node) {
-          setContextMenu({ x: e.clientX, y: e.clientY, node });
-      }
-  };
+  const centerColors = getModeColor(centerNode.mode);
 
   return (
-    <div ref={containerRef} className="w-full h-full relative bg-[var(--ui-bg)] overflow-hidden touch-none select-none">
+    <div className="flex h-full bg-[#050911] relative overflow-hidden font-sans text-white select-none">
+      
+      {/* --- CONTROLS HUD --- */}
+      <div className="absolute top-4 left-4 z-30 bg-black/60 backdrop-blur-md border border-white/10 p-3 rounded-xl w-64 shadow-2xl transition-opacity duration-300 hover:opacity-100 opacity-80">
+          <div className="flex items-center gap-2 mb-3 text-xs font-bold text-gray-400 uppercase tracking-widest border-b border-white/5 pb-2">
+              <Settings2 size={12}/> Synaptic Tuner
+          </div>
+          
+          <div className="space-y-4">
+              <div className="flex items-center justify-between group">
+                  <span className="text-[10px] text-gray-400 group-hover:text-white transition-colors">Auto-Connect</span>
+                  <button onClick={() => setAutoConnect(!autoConnect)} className={`w-8 h-4 rounded-full relative transition-colors ${autoConnect ? 'bg-indigo-600' : 'bg-gray-700'}`}>
+                      <div className={`absolute top-0.5 w-3 h-3 bg-white rounded-full transition-all ${autoConnect ? 'left-4.5' : 'left-0.5'}`}></div>
+                  </button>
+              </div>
+
+              {autoConnect && (
+                  <div className="space-y-1">
+                      <div className="flex justify-between text-[10px] text-gray-500">
+                          <span>Loose</span>
+                          <span>Strict</span>
+                      </div>
+                      <input 
+                        type="range" min="0" max="0.8" step="0.05" 
+                        value={threshold} 
+                        onChange={(e) => setThreshold(parseFloat(e.target.value))}
+                        className="w-full h-1 bg-gray-700 rounded-lg appearance-none cursor-pointer accent-indigo-500 hover:accent-indigo-400"
+                      />
+                  </div>
+              )}
+              
+              <div className="pt-1">
+                  <div className="relative group focus-within:ring-1 focus-within:ring-indigo-500 rounded-lg transition-all">
+                    <Search size={12} className="absolute left-2 top-2 text-gray-500 group-focus-within:text-white"/>
+                    <input 
+                        type="text" value={search} onChange={e => setSearch(e.target.value)}
+                        placeholder="Filter Nodes..."
+                        className="w-full bg-black/30 border border-gray-700 rounded-lg py-1.5 pl-7 text-[10px] text-white outline-none placeholder:text-gray-600"
+                    />
+                  </div>
+              </div>
+          </div>
+      </div>
+
+      {/* --- LIST PANEL --- */}
+      <div className="hidden lg:flex flex-col w-64 border-r border-white/5 bg-black/20 backdrop-blur z-20 absolute left-0 top-64 bottom-0 pointer-events-auto">
+         <div className="p-3 border-b border-white/10 flex justify-between items-center">
+            <span className="text-[10px] font-bold text-gray-500 uppercase">Dormant Nodes</span>
+            <span className="text-[9px] bg-white/10 px-1.5 rounded text-gray-400">{otherNodes.length}</span>
+         </div>
+         <div className="flex-1 overflow-y-auto custom-scrollbar p-2 space-y-1">
+             {otherNodes.map(n => (
+                 <div 
+                   key={n.id} 
+                   onClick={() => handleNodeClick(n.id)} 
+                   className="p-2 hover:bg-white/5 rounded cursor-pointer text-xs text-gray-400 hover:text-white truncate transition-all flex items-center gap-2 group"
+                 >
+                     <div className={`w-1.5 h-1.5 rounded-full ${getModeColor(n.mode).bg} opacity-50 group-hover:opacity-100`}></div>
+                     {n.topic}
+                 </div>
+             ))}
+         </div>
+      </div>
+
+      {/* --- MAIN LATTICE --- */}
+      <div className="flex-1 relative flex items-center justify-center overflow-hidden bg-[radial-gradient(circle_at_center,_rgba(17,24,39,0.5)_0%,_rgba(5,9,17,1)_80%)]">
         
-        {/* Placeholder - Only shows if truly no data, but canvas grid will still render behind it */}
-        {!hasData && (
-            <div className="absolute inset-0 flex flex-col items-center justify-center z-10 pointer-events-none p-6">
-                <div className="bg-[var(--ui-surface)]/80 backdrop-blur-md p-8 rounded-2xl border border-[var(--ui-border)] shadow-2xl text-center max-w-sm">
-                    <div className="w-16 h-16 bg-[var(--ui-bg)] rounded-full flex items-center justify-center mx-auto mb-4 shadow-inner border border-[var(--ui-border)]">
-                        <BrainCircuit size={32} className="text-[var(--ui-text-muted)]" />
+        {/* Render Stage */}
+        <div 
+            className={`relative w-[600px] h-[600px] flex items-center justify-center transition-all duration-500 ease-in-out ${isTransitioning ? 'scale-50 opacity-0 blur-sm' : 'scale-100 opacity-100 blur-0'}`}
+        >
+            
+            {/* SVG Layer */}
+            <svg className="absolute inset-0 w-full h-full pointer-events-none z-0 overflow-visible">
+                {connections.map((edge, i) => {
+                    const radius = window.innerWidth < 768 ? 140 : 240;
+                    const { x, y } = getOrbitPosition(i, satellites.length, radius);
+                    const isManual = edge.type === 'manual';
+                    
+                    return (
+                        <g key={`edge-${edge.targetId}`}>
+                            <line 
+                                x1="50%" y1="50%" 
+                                x2={`calc(50% + ${x}px)`} y2={`calc(50% + ${y}px)`} 
+                                stroke={isManual ? '#fbbf24' : 'rgba(99, 102, 241, 0.4)'} 
+                                strokeWidth={isManual ? 2 : 1}
+                                strokeDasharray={isManual ? '0' : '4 4'}
+                                opacity={isManual ? 1 : 0.5 + (edge.strength * 0.5)}
+                                className="transition-all duration-1000"
+                            />
+                            {/* Similarity Label on Line */}
+                            {autoConnect && !isManual && (
+                                <rect 
+                                  x={`calc(50% + ${x * 0.5}px - 10px)`} 
+                                  y={`calc(50% + ${y * 0.5}px - 6px)`} 
+                                  width="20" height="12" 
+                                  fill="#050911" 
+                                />
+                            )}
+                            {autoConnect && !isManual && (
+                                <text x={`calc(50% + ${x * 0.5}px)`} y={`calc(50% + ${y * 0.5}px + 3px)`} fill="rgba(255,255,255,0.3)" fontSize="9" textAnchor="middle" className="font-mono">
+                                    {Math.round(edge.strength * 100)}%
+                                </text>
+                            )}
+                        </g>
+                    );
+                })}
+            </svg>
+
+            {/* CENTER NODE (Target Lock UI) */}
+            <div className="relative z-30 group cursor-default">
+                {/* Target Reticles (Spinning) */}
+                <div className={`absolute -inset-10 border border-${centerColors.border.split('-')[1]}-500/20 rounded-full animate-[spin_10s_linear_infinite] pointer-events-none`}></div>
+                <div className={`absolute -inset-10 border-t border-b border-${centerColors.border.split('-')[1]}-500/50 rounded-full animate-[spin_10s_linear_infinite] pointer-events-none`}></div>
+                <div className={`absolute -inset-6 border-l border-r border-${centerColors.border.split('-')[1]}-500/50 rounded-full animate-[spin_5s_linear_infinite_reverse] pointer-events-none`}></div>
+                
+                <div className={`w-32 h-32 md:w-44 md:h-44 bg-[#0f172a] border-2 ${centerColors.border} rounded-full flex flex-col items-center justify-center text-center p-4 shadow-[0_0_50px_rgba(0,0,0,0.5)] z-10 relative overflow-hidden`}>
+                    
+                    {/* Background Pulse */}
+                    <div className={`absolute inset-0 ${centerColors.bg} opacity-10 animate-pulse`}></div>
+                    
+                    <div className="relative z-10 flex flex-col items-center gap-1">
+                        <span className="text-[9px] font-mono text-gray-500 uppercase tracking-widest flex items-center gap-1">
+                             <Target size={10} className="animate-ping absolute opacity-75"/> 
+                             <Target size={10} /> Active Target
+                        </span>
+                        <h2 className="text-sm md:text-base font-bold text-white leading-tight mb-2 line-clamp-2">{centerNode.topic}</h2>
+                        
+                        <div className="flex gap-2 mt-2">
+                             <button onClick={(e) => { e.stopPropagation(); onSelectNote(centerNode); }} className={`px-4 py-1.5 bg-white text-black hover:bg-gray-200 text-[10px] font-bold uppercase rounded-full flex items-center gap-1 transition-all hover:scale-105 hover:shadow-lg`}>
+                                <FileText size={12}/> Open
+                             </button>
+                        </div>
                     </div>
-                    <h3 className="text-lg font-bold text-[var(--ui-text-main)] mb-2">Neural Network Offline</h3>
-                    <p className="text-xs text-[var(--ui-text-muted)] leading-relaxed">
-                        The synapse graph is currently empty. Create notes in the Workspace to visualize connections.
-                    </p>
                 </div>
             </div>
-        )}
 
-        {/* CANVAS LAYER */}
-        <canvas 
-            ref={canvasRef}
-            className="absolute inset-0 block cursor-grab active:cursor-grabbing"
-            onMouseDown={handleStart}
-            onMouseMove={handleMove}
-            onMouseUp={handleEnd}
-            onMouseLeave={handleEnd}
-            onTouchStart={handleStart}
-            onTouchMove={handleMove}
-            onTouchEnd={handleEnd}
-            onContextMenu={handleContextMenu}
-        />
+            {/* SATELLITES */}
+            {satellites.map((node, i) => {
+                const radius = window.innerWidth < 768 ? 140 : 240;
+                const { x, y } = getOrbitPosition(i, satellites.length, radius);
+                const colors = getModeColor(node.mode);
+                const isManual = connections[i].type === 'manual';
+                const isHovered = hoveredNode?.id === node.id;
 
-        {/* HUD Controls */}
-        <div className="absolute top-4 left-4 right-4 z-20 flex justify-between items-start pointer-events-none">
-            <div className="flex flex-col gap-2 pointer-events-auto w-full max-w-xs">
-                <div className="bg-[var(--ui-surface)]/80 backdrop-blur-md border border-[var(--ui-border)] p-3 rounded-2xl shadow-xl flex items-center gap-3">
-                    <div className="p-2 bg-[var(--ui-primary)] text-white rounded-xl shadow-lg shadow-blue-500/30">
-                        <Maximize2 size={18} />
-                    </div>
-                    <div>
-                        <h2 className="text-xs font-bold text-[var(--ui-text-main)] uppercase tracking-wider">Synapse Graph</h2>
-                        <p className="text-[10px] text-[var(--ui-text-muted)]">{nodesRef.current.length} Nodes Active</p>
-                    </div>
-                </div>
-            </div>
-        </div>
-
-        <div className="absolute bottom-6 left-0 right-0 flex justify-center gap-4 z-20 pointer-events-none px-6">
-            {spotlightNode && (
-                <div className="pointer-events-auto animate-slide-up">
-                    <button 
-                        onClick={() => {
-                            const n = nodesRef.current.find(node => node.id === spotlightNode);
-                            if (n) onSelectNote(n.data);
-                        }}
-                        className="flex items-center gap-2 px-6 py-3 bg-[var(--ui-primary)] text-white rounded-full font-bold shadow-xl shadow-blue-500/40 hover:scale-105 transition-transform active:scale-95"
+                return (
+                    <div 
+                        key={node.id}
+                        className="absolute z-20 group transition-all duration-500"
+                        style={{ transform: `translate(${x}px, ${y}px)` }}
+                        onMouseEnter={() => setHoveredNode(node)}
+                        onMouseLeave={() => setHoveredNode(null)}
+                        onClick={() => handleNodeClick(node.id)} 
                     >
-                        <FileText size={18} /> Open Note
-                    </button>
-                </div>
-            )}
+                        {/* Connecting Line Hint (Only on hover) */}
+                        {isHovered && (
+                             <div className="absolute top-1/2 left-1/2 w-0 h-0 -z-10">
+                                 <div className="absolute top-0 left-0 w-[200px] h-[1px] bg-white/20 origin-left rotate-180" style={{ transform: `rotate(${Math.atan2(-y, -x) * (180/Math.PI)}deg)` }}></div>
+                             </div>
+                        )}
 
-            <div className="pointer-events-auto bg-[var(--ui-surface)]/90 backdrop-blur-md border border-[var(--ui-border)] rounded-full p-1.5 flex items-center gap-1 shadow-2xl">
-                <button onClick={() => setTransform(t => ({...t, k: Math.min(t.k + 0.2, 3)}))} className="p-3 hover:bg-[var(--ui-bg)] rounded-full text-[var(--ui-text-main)] transition-colors"><ZoomIn size={20}/></button>
-                <button onClick={() => { setTransform({ x: containerRef.current!.clientWidth/2, y: containerRef.current!.clientHeight/2, k: 0.8 }); setSpotlightNode(null); }} className="p-3 hover:bg-[var(--ui-bg)] rounded-full text-[var(--ui-text-main)] transition-colors"><RefreshCw size={20}/></button>
-                <button onClick={() => setTransform(t => ({...t, k: Math.max(t.k - 0.2, 0.2)}))} className="p-3 hover:bg-[var(--ui-bg)] rounded-full text-[var(--ui-text-main)] transition-colors"><ZoomOut size={20}/></button>
+                        {/* Node Circle */}
+                        <div className={`
+                             w-12 h-12 md:w-14 md:h-14 rounded-full bg-[#0f172a] border-2 flex items-center justify-center cursor-pointer transition-all duration-300 relative
+                             ${isHovered ? `scale-125 border-white shadow-[0_0_20px_rgba(255,255,255,0.3)] z-50` : isManual ? 'border-amber-400 shadow-amber-900/20' : 'border-gray-700'}
+                        `}>
+                            {/* Scanning Effect on Hover */}
+                            {isHovered && (
+                                <div className="absolute inset-0 rounded-full border border-white/50 animate-ping"></div>
+                            )}
+
+                            {isManual && <div className="absolute -top-1 -right-1 bg-amber-500 rounded-full p-0.5 z-10"><Link2 size={8} className="text-black"/></div>}
+                            
+                            <div className={`${isHovered ? 'text-white' : isManual ? 'text-amber-100' : 'text-gray-400'} transition-colors`}>
+                                {getModeIcon(node.mode)}
+                            </div>
+                        </div>
+                        
+                        {/* Floating Label (Always visible but subtle) */}
+                        <div className={`absolute top-16 left-1/2 -translate-x-1/2 text-center w-32 pointer-events-none transition-all duration-300 ${isHovered ? 'opacity-100 translate-y-0' : 'opacity-60 translate-y-[-5px]'}`}>
+                            <span className={`text-[10px] font-bold px-2 py-1 rounded truncate block border backdrop-blur-md ${isHovered ? 'bg-white text-black border-white' : 'bg-black/60 text-gray-400 border-white/10'}`}>
+                                {node.topic}
+                            </span>
+                        </div>
+
+                        {/* HOVER ACTION MENU */}
+                        {isHovered && (
+                            <div className="absolute bottom-full mb-3 left-1/2 -translate-x-1/2 w-48 bg-gray-900/95 backdrop-blur-xl border border-gray-700 rounded-xl p-3 shadow-2xl z-50 pointer-events-auto origin-bottom animate-slide-up">
+                                <div className="flex justify-between items-start mb-2">
+                                    <span className={`text-[9px] font-bold uppercase px-1.5 py-0.5 rounded border ${colors.border} ${colors.text} bg-black/50`}>
+                                        {node.mode}
+                                    </span>
+                                    <button 
+                                        onClick={(e) => handleToggleLink(e, node)}
+                                        className={`p-1.5 rounded transition-colors ${isManual ? 'bg-amber-500/20 text-amber-400 hover:bg-amber-500/30' : 'bg-gray-800 text-gray-400 hover:text-white hover:bg-gray-700'}`}
+                                        title={isManual ? "Unlink" : "Link Permanently"}
+                                    >
+                                        {isManual ? <Unlock size={12}/> : <Link2 size={12}/>}
+                                    </button>
+                                </div>
+                                <div className="flex flex-col gap-1 mt-2">
+                                    <button 
+                                        onClick={() => handleNodeClick(node.id)}
+                                        className="w-full py-1.5 bg-gray-800 hover:bg-gray-700 text-white text-[10px] font-bold rounded flex items-center justify-center gap-1"
+                                    >
+                                        <Crosshair size={10}/> Center Focus
+                                    </button>
+                                    <button 
+                                        onClick={(e) => { e.stopPropagation(); onSelectNote(node); }}
+                                        className="w-full py-1.5 bg-indigo-600 hover:bg-indigo-500 text-white text-[10px] font-bold rounded flex items-center justify-center gap-1"
+                                    >
+                                        <FileText size={10}/> Open Note
+                                    </button>
+                                </div>
+                            </div>
+                        )}
+                    </div>
+                );
+            })}
+
+        </div>
+
+        {/* Status Footer */}
+        <div className="absolute bottom-6 left-0 right-0 flex justify-center pointer-events-none">
+            <div className="bg-black/80 backdrop-blur px-6 py-2 rounded-full border border-white/10 flex items-center gap-6 shadow-2xl">
+                <div className="flex items-center gap-2">
+                    <Activity size={12} className="text-green-500 animate-pulse"/>
+                    <span className="text-[10px] font-mono text-gray-400">
+                        SYSTEM ONLINE <span className="text-gray-600">|</span> NODES: {notes.length}
+                    </span>
+                </div>
+                <div className="h-3 w-[1px] bg-gray-700"></div>
+                <div className="flex items-center gap-1.5">
+                    <span className="w-2 h-2 rounded-full bg-amber-400"></span>
+                    <span className="text-[9px] text-gray-500 font-bold uppercase">Manual</span>
+                </div>
+                <div className="flex items-center gap-1.5">
+                    <span className="w-2 h-2 rounded-full bg-indigo-500 opacity-50"></span>
+                    <span className="text-[9px] text-gray-500 font-bold uppercase">Auto</span>
+                </div>
             </div>
         </div>
 
-        {/* Context Menu */}
-        {contextMenu && (
-            <div 
-                className="fixed z-50 bg-[var(--ui-surface)] border border-[var(--ui-border)] rounded-xl shadow-2xl py-1 w-48 animate-fade-in backdrop-blur-xl"
-                style={{ top: contextMenu.y, left: contextMenu.x }}
-                onMouseLeave={() => setContextMenu(null)}
-            >
-                <div className="px-4 py-2 border-b border-[var(--ui-border)] bg-[var(--ui-bg)]/50 rounded-t-xl">
-                    <span className="text-[10px] text-[var(--ui-text-muted)] font-bold uppercase tracking-wider block truncate">{contextMenu.node.label}</span>
-                </div>
-                <button onClick={() => { onSelectNote(contextMenu.node.data); setContextMenu(null); }} className="w-full text-left px-4 py-3 text-xs text-[var(--ui-text-main)] hover:bg-[var(--ui-bg)] flex items-center gap-3 transition-colors">
-                    <FileText size={14} className="text-[var(--ui-primary)]"/> Open Note
-                </button>
-                <button onClick={() => { setSpotlightNode(contextMenu.node.id); setContextMenu(null); }} className="w-full text-left px-4 py-3 text-xs text-[var(--ui-text-main)] hover:bg-[var(--ui-bg)] flex items-center gap-3 transition-colors">
-                    <Focus size={14} className="text-amber-500"/> Focus Neighborhood
-                </button>
-                <button onClick={() => { 
-                    if(confirm("Delete node?")) storage.deleteNoteLocal(contextMenu.node.id); 
-                    loadData(); 
-                    setContextMenu(null); 
-                }} className="w-full text-left px-4 py-3 text-xs text-red-500 hover:bg-red-50 flex items-center gap-3 transition-colors rounded-b-xl">
-                    <Trash2 size={14}/> Delete
-                </button>
-            </div>
-        )}
+      </div>
     </div>
   );
 };
 
-export default React.memo(GraphView);
+export default NeuralLattice;

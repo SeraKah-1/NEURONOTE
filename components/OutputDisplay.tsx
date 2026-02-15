@@ -2,7 +2,7 @@
 import React, { useState, useEffect, useRef, useMemo, useCallback } from 'react';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
-import { Download, Copy, Eye, Check, List, Book, Focus, Save, Edit3, CloudUpload, Clipboard, ClipboardCheck, EyeOff, MousePointerClick, BookOpen, Microscope, Activity, AlertTriangle, Info, Wand2, Search, X, HelpCircle, MessageSquareQuote, LayoutTemplate } from 'lucide-react';
+import { Download, Copy, Eye, Check, List, Book, Focus, Save, Edit3, CloudUpload, Clipboard, ClipboardCheck, EyeOff, MousePointerClick, BookOpen, Microscope, Activity, AlertTriangle, Info, Wand2, Search, X, HelpCircle, MessageSquareQuote, LayoutTemplate, Undo2, Redo2 } from 'lucide-react';
 import { StorageService } from '../services/storageService';
 import { processGeneratedNote } from '../utils/formatter';
 import Mermaid from './Mermaid';
@@ -52,6 +52,10 @@ const SensorBlock: React.FC<{ children: React.ReactNode; active: boolean; label?
 });
 
 const OutputDisplay: React.FC<OutputDisplayProps> = ({ content, topic, onUpdateContent, onManualSave, noteId, theme = AppTheme.CLINICAL_CLEAN }) => {
+  // HISTORY STATE FOR UNDO/REDO
+  const [history, setHistory] = useState<string[]>([content]);
+  const [historyIndex, setHistoryIndex] = useState(0);
+  
   const [editableContent, setEditableContent] = useState(content);
   const [isDirty, setIsDirty] = useState(false);
   
@@ -59,7 +63,6 @@ const OutputDisplay: React.FC<OutputDisplayProps> = ({ content, topic, onUpdateC
   const [copied, setCopied] = useState(false);
   const [showToc, setShowToc] = useState(true);
   const [activeHeaderId, setActiveHeaderId] = useState<string>('');
-  const [syntaxFixed, setSyntaxFixed] = useState(false);
   
   const scrollRef = useRef<HTMLDivElement>(null);
   const [sensorMode, setSensorMode] = useState(false);
@@ -69,19 +72,69 @@ const OutputDisplay: React.FC<OutputDisplayProps> = ({ content, topic, onUpdateC
   const [searchQuery, setSearchQuery] = useState('');
   const searchInputRef = useRef<HTMLInputElement>(null);
 
-  useEffect(() => { setEditableContent(content); setIsDirty(false); }, [content]);
+  // --- SYNC WITH PROPS ONLY ON MOUNT OR ID CHANGE ---
+  useEffect(() => { 
+      setEditableContent(content); 
+      setHistory([content]);
+      setHistoryIndex(0);
+      setIsDirty(false); 
+  }, [noteId]); 
+
+  // --- HISTORY MANAGEMENT ---
+  const pushToHistory = (newContent: string) => {
+    if (newContent === history[historyIndex]) return;
+    
+    const newHistory = history.slice(0, historyIndex + 1);
+    newHistory.push(newContent);
+    
+    // Limit history stack size
+    if (newHistory.length > 50) newHistory.shift();
+    
+    setHistory(newHistory);
+    setHistoryIndex(newHistory.length - 1);
+    setEditableContent(newContent);
+    setIsDirty(true);
+    
+    if (onUpdateContent) onUpdateContent(newContent);
+  };
+
+  const undo = () => {
+    if (historyIndex > 0) {
+      const newIndex = historyIndex - 1;
+      setHistoryIndex(newIndex);
+      setEditableContent(history[newIndex]);
+      if (onUpdateContent) onUpdateContent(history[newIndex]);
+    }
+  };
+
+  const redo = () => {
+    if (historyIndex < history.length - 1) {
+      const newIndex = historyIndex + 1;
+      setHistoryIndex(newIndex);
+      setEditableContent(history[newIndex]);
+      if (onUpdateContent) onUpdateContent(history[newIndex]);
+    }
+  };
 
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
+        // Search
         if ((e.ctrlKey || e.metaKey) && e.key === 'f') {
             e.preventDefault();
             if (activeTab === 'preview') { setShowSearch(true); setTimeout(() => searchInputRef.current?.focus(), 50); }
         }
         if (e.key === 'Escape' && showSearch) { setShowSearch(false); setSearchQuery(''); }
+
+        // Undo/Redo
+        if ((e.ctrlKey || e.metaKey) && e.key === 'z') {
+           e.preventDefault();
+           if (e.shiftKey) redo();
+           else undo();
+        }
     };
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [activeTab, showSearch]);
+  }, [activeTab, showSearch, historyIndex, history]);
 
   const toc = useMemo(() => {
     const lines = editableContent.split('\n');
@@ -106,8 +159,17 @@ const OutputDisplay: React.FC<OutputDisplayProps> = ({ content, topic, onUpdateC
     if (currentActive !== activeHeaderId) setActiveHeaderId(currentActive);
   }, [toc, activeHeaderId]);
 
-  const handleContentChange = (e: React.ChangeEvent<HTMLTextAreaElement>) => { setEditableContent(e.target.value); setIsDirty(true); if (onUpdateContent) onUpdateContent(e.target.value); };
-  const handleFixSyntax = () => { const fixed = processGeneratedNote(editableContent); if (fixed !== editableContent) { setEditableContent(fixed); if (onUpdateContent) onUpdateContent(fixed); setIsDirty(true); setSyntaxFixed(true); setTimeout(() => setSyntaxFixed(false), 2000); } else { alert("Syntax is already clean!"); } };
+  const handleContentChange = (e: React.ChangeEvent<HTMLTextAreaElement>) => { 
+      const newText = e.target.value;
+      setEditableContent(newText);
+      setIsDirty(true);
+      if (onUpdateContent) onUpdateContent(newText);
+  };
+  
+  const handleTextBlur = () => {
+     pushToHistory(editableContent);
+  };
+
   const handleManualSaveTrigger = () => { if (onManualSave) { onManualSave(editableContent); setIsDirty(false); } };
   const handleUploadToCloud = async () => { if (isDirty) return alert("Save first."); if (!noteId) return alert("Save first."); const storage = StorageService.getInstance(); if (!storage.isCloudReady()) return alert("Connect Supabase."); try { const notes = storage.getLocalNotes(); const note = notes.find(n => n.id === noteId); if (note) { await storage.uploadNoteToCloud({...note, content: editableContent}); alert("Uploaded!"); } } catch (e: any) { alert("Failed: " + e.message); } };
   const handleDownload = () => { const blob = new Blob([editableContent], { type: 'text/markdown' }); const url = URL.createObjectURL(blob); const a = document.createElement('a'); a.href = url; a.download = `${topic.replace(/\s+/g, '_')}.md`; document.body.appendChild(a); a.click(); document.body.removeChild(a); URL.revokeObjectURL(url); };
@@ -123,7 +185,11 @@ const OutputDisplay: React.FC<OutputDisplayProps> = ({ content, topic, onUpdateC
     const copyCode = () => { navigator.clipboard.writeText(content); setIsCopied(true); setTimeout(() => setIsCopied(false), 2000); };
 
     if (isMermaid) {
-        return ( <SensorBlock active={sensorMode} label="Reveal Diagram"> <Mermaid chart={content} /> </SensorBlock> );
+        return ( 
+            <SensorBlock active={sensorMode} label="Reveal Diagram"> 
+                <Mermaid chart={content} key={content} /> 
+            </SensorBlock> 
+        );
     }
     if (!match) return <code className="bg-[var(--md-code-bg)] px-1 py-0.5 rounded text-red-500 font-mono text-sm border border-[var(--md-border)]" {...props}>{children}</code>;
 
@@ -156,7 +222,6 @@ const OutputDisplay: React.FC<OutputDisplayProps> = ({ content, topic, onUpdateC
                    let Icon = Info;
                    let title = "Note";
                    
-                   // Enhanced Callout Mapping
                    if (['abstract', 'summary'].includes(type)) { containerClass = "callout-abstract"; Icon = Microscope; title = "Concept"; }
                    else if (['tip', 'success', 'check'].includes(type)) { containerClass = "callout-tip"; Icon = Activity; title = "Clinical Pearl"; }
                    else if (['danger', 'error', 'warning'].includes(type)) { containerClass = "callout-danger"; Icon = AlertTriangle; title = "Critical Alert"; }
@@ -264,6 +329,26 @@ const OutputDisplay: React.FC<OutputDisplayProps> = ({ content, topic, onUpdateC
 
            {/* Tool Actions */}
            <div className="flex items-center gap-2 shrink-0">
+              {/* HISTORY CONTROLS */}
+              <div className="flex bg-[var(--ui-bg)] rounded-full border border-[var(--ui-border)] p-0.5 shrink-0 mr-2">
+                 <button 
+                    onClick={undo} 
+                    disabled={historyIndex === 0}
+                    className="p-2 rounded-full text-[var(--ui-text-muted)] hover:text-[var(--ui-text-main)] hover:bg-[var(--ui-surface)] transition-colors disabled:opacity-30" 
+                    title="Undo (Ctrl+Z)"
+                 >
+                     <Undo2 size={16}/>
+                 </button>
+                 <button 
+                    onClick={redo} 
+                    disabled={historyIndex === history.length - 1}
+                    className="p-2 rounded-full text-[var(--ui-text-muted)] hover:text-[var(--ui-text-main)] hover:bg-[var(--ui-surface)] transition-colors disabled:opacity-30" 
+                    title="Redo (Ctrl+Shift+Z)"
+                 >
+                     <Redo2 size={16}/>
+                 </button>
+              </div>
+
               <button onClick={() => setSensorMode(!sensorMode)} className={`p-2 rounded-full transition-all border ${sensorMode ? 'bg-amber-100 border-amber-300 text-amber-600' : 'bg-[var(--ui-bg)] border-[var(--ui-border)] text-[var(--ui-text-muted)] hover:text-[var(--ui-primary)]'}`} title="Active Recall Mode">
                  {sensorMode ? <EyeOff size={16}/> : <Eye size={16}/>}
               </button>
@@ -272,7 +357,7 @@ const OutputDisplay: React.FC<OutputDisplayProps> = ({ content, topic, onUpdateC
               
               <div className="flex bg-[var(--ui-bg)] rounded-full border border-[var(--ui-border)] p-0.5 shrink-0">
                   <button onClick={() => setShowToc(!showToc)} className="p-2 rounded-full text-[var(--ui-text-muted)] hover:text-[var(--ui-text-main)] hover:bg-[var(--ui-surface)] transition-colors" title="Toggle TOC"><List size={16}/></button>
-                  <button onClick={handleFixSyntax} className="p-2 rounded-full text-[var(--ui-text-muted)] hover:text-[var(--ui-text-main)] hover:bg-[var(--ui-surface)] transition-colors" title="Fix Syntax"><Wand2 size={16} className={syntaxFixed ? 'text-green-500' : ''}/></button>
+                  
                   <button onClick={handleCopy} className="p-2 rounded-full text-[var(--ui-text-muted)] hover:text-[var(--ui-text-main)] hover:bg-[var(--ui-surface)] transition-colors" title="Copy">{copied ? <Check size={16}/> : <Copy size={16}/>}</button>
                   <button onClick={handleDownload} className="p-2 rounded-full text-[var(--ui-text-muted)] hover:text-[var(--ui-text-main)] hover:bg-[var(--ui-surface)] transition-colors" title="Download"><Download size={16}/></button>
                   <button onClick={handleUploadToCloud} className="p-2 rounded-full text-[var(--ui-text-muted)] hover:text-[var(--ui-text-main)] hover:bg-[var(--ui-surface)] transition-colors" title="Upload"><CloudUpload size={16}/></button>
@@ -304,6 +389,7 @@ const OutputDisplay: React.FC<OutputDisplayProps> = ({ content, topic, onUpdateC
            <textarea 
              value={editableContent}
              onChange={handleContentChange}
+             onBlur={handleTextBlur}
              className="flex-1 w-full bg-[#0a0f18] text-gray-300 font-mono text-sm p-6 outline-none resize-none custom-scrollbar border-none"
              spellCheck={false}
            />

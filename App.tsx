@@ -12,13 +12,14 @@ import LoginGate from './components/LoginGate';
 import FileSystem from './components/FileSystem'; 
 import NeuralVault from './components/NeuralVault';
 import CommandPalette from './components/CommandPalette';
+// FIX: Strict relative import
+import ErrorBoundary from './components/ErrorBoundary';
 
 // LAZY LOAD OPTIMIZATION:
 const OutputDisplay = React.lazy(() => import('./components/OutputDisplay'));
 const AdminPanel = React.lazy(() => import('./components/AdminPanel'));
 const GraphView = React.lazy(() => import('./components/GraphView'));
 
-// ... (Constants omitted for brevity, logic remains same)
 const SUPABASE_SETUP_SQL = `
 -- RUN THIS IN SUPABASE SQL EDITOR --
 
@@ -56,8 +57,7 @@ const INITIAL_GROQ_MODELS = [
   { value: AppModel.GROQ_GEMMA2_9B, label: 'Gemma 2 9B', badge: 'Google' },
 ];
 
-const App: React.FC = () => {
-  // ... (State Hooks logic remains same)
+const AppContent: React.FC = () => {
   const [isAuthenticated, setIsAuthenticated] = useState(false);
   const [showPalette, setShowPalette] = useState(false);
   const [focusMode, setFocusMode] = useState(false);
@@ -103,7 +103,6 @@ const App: React.FC = () => {
   const [showAdminModal, setShowAdminModal] = useState(false);
   const [savedTemplates, setSavedTemplates] = useState<SavedPrompt[]>([]);
 
-  // ... (Effects and Handlers match previous version)
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
       if ((e.metaKey || e.ctrlKey) && e.key === 'k') { e.preventDefault(); setShowPalette(prev => !prev); }
@@ -318,7 +317,7 @@ const App: React.FC = () => {
                   {[
                       { v: AppView.WORKSPACE, label: 'Main Menu', icon: Home },
                       { v: AppView.ARCHIVE, label: 'Neural Vault', icon: Cloud },
-                      { v: AppView.GRAPH, label: 'Synapse Graph', icon: Network } // Added Graph Button
+                      { v: AppView.GRAPH, label: 'Neural Lattice', icon: Network } // Updated Label
                   ].map(btn => (
                       <button key={btn.label} onClick={() => setView(btn.v)} className={`w-full flex items-center gap-3 p-2 rounded-lg hover:bg-[var(--ui-bg)] text-[var(--ui-text-muted)] hover:text-[var(--ui-text-main)] transition-colors ${appState.currentView === btn.v ? 'bg-[var(--ui-bg)] font-bold text-[var(--ui-text-main)] border border-[var(--ui-border)]' : ''}`}>
                           <btn.icon size={16} className={appState.currentView === btn.v ? 'text-[var(--ui-primary)]' : ''}/> <span className="text-xs">{btn.label}</span>
@@ -371,7 +370,7 @@ const App: React.FC = () => {
                      
                      {appState.currentView === AppView.SYLLABUS ? 'Syllabus Manager' : 
                       appState.currentView === AppView.ARCHIVE ? 'Neural Vault' : 
-                      appState.currentView === AppView.GRAPH ? 'Synapse Graph' :
+                      appState.currentView === AppView.GRAPH ? 'Neural Lattice' :
                       'Workspace'}
                   </h2>
                   <p className="text-[var(--ui-text-muted)] text-sm mt-1 font-medium">
@@ -407,10 +406,10 @@ const App: React.FC = () => {
           
           {!appState.isLoading && appState.currentView === AppView.ARCHIVE && <div className="flex-1 animate-slide-up h-full flex flex-col"><NeuralVault onSelectNote={handleSelectNoteFromFileSystem} onImportCloud={handleRetrieveFromCloud} /></div>}
           
-          {/* GRAPH VIEW */}
+          {/* GRAPH VIEW (Neural Lattice) */}
           {!appState.isLoading && appState.currentView === AppView.GRAPH && (
              <div className="flex-1 animate-slide-up h-full flex flex-col overflow-hidden relative border border-[var(--ui-border)] rounded-xl shadow-inner bg-[var(--ui-bg)]">
-                <Suspense fallback={<div className="flex items-center justify-center h-full text-[var(--ui-text-muted)]">Loading Neural Graph...</div>}>
+                <Suspense fallback={<div className="flex items-center justify-center h-full text-[var(--ui-text-muted)]">Unfolding Neural Lattice...</div>}>
                    <GraphView onSelectNote={handleSelectNoteFromFileSystem} />
                 </Suspense>
              </div>
@@ -597,5 +596,13 @@ const App: React.FC = () => {
     </div>
   );
 };
+
+const App: React.FC = () => {
+    return (
+        <ErrorBoundary>
+            <AppContent />
+        </ErrorBoundary>
+    );
+}
 
 export default App;
