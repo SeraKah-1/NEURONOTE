@@ -43,7 +43,7 @@ const CommandPalette: React.FC<CommandPaletteProps> = ({
   useEffect(() => {
     if (isOpen) {
       const storage = StorageService.getInstance();
-      setNotes(storage.getLocalNotes()); // Fast local search
+      setNotes(storage.getLocalNotesMetadata()); // Fast local search - metadata only
       setQuery('');
       setSelectedIndex(0);
       // Focus input

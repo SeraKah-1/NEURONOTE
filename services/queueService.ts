@@ -25,6 +25,7 @@ export class QueueService {
 
   private constructor() {
     this.storage = StorageService.getInstance();
+    this.recoverState();
   }
 
   public static getInstance(): QueueService {
@@ -34,8 +35,35 @@ export class QueueService {
     return QueueService.instance;
   }
 
+  // --- RECOVERY LOGIC (CRITICAL FIX) ---
+  private recoverState() {
+      const savedQueue = localStorage.getItem('neuro_syllabus_queue');
+      if (savedQueue) {
+          try {
+              const parsed: SyllabusItem[] = JSON.parse(savedQueue);
+              // Sanitize: If items were "processing" when app closed, mark them as error/interrupted
+              this.queue = parsed.map(item => {
+                  if (['drafting_struct', 'generating_note'].includes(item.status)) {
+                      return { 
+                          ...item, 
+                          status: 'error', 
+                          errorMsg: 'Process interrupted (Page Reload/Crash). Retry needed.' 
+                      };
+                  }
+                  return item;
+              });
+              this.persistQueue();
+          } catch (e) {
+              console.error("Queue recovery failed", e);
+              this.queue = [];
+          }
+      }
+  }
+
   public subscribe(callback: UpdateCallback) {
     this.listeners.push(callback);
+    // Immediately emit current state upon subscription
+    callback([...this.queue], this.isProcessing, this.circuitOpen ? "CIRCUIT BREAKER ACTIVE" : undefined);
     return () => {
       this.listeners = this.listeners.filter(cb => cb !== callback);
     };
@@ -49,29 +77,22 @@ export class QueueService {
   public setQueue(items: SyllabusItem[]) {
     this.queue = items;
     this.notify();
+    this.persistQueue();
   }
 
   public updateItemStructure(id: string, newStructure: string) {
     const idx = this.queue.findIndex(i => i.id === id);
     if (idx !== -1) {
-      // If user manually updates structure, assume they approve it
       const updatedQueue = [...this.queue];
       updatedQueue[idx] = { 
         ...updatedQueue[idx], 
         structure: newStructure, 
-        status: 'struct_ready' // Ready for Phase 2
+        status: 'struct_ready',
+        errorMsg: undefined // Clear error on manual update
       };
       this.queue = updatedQueue;
       this.notify();
       this.persistQueue();
-    }
-  }
-
-  public approveItem(id: string) {
-    // Manually force an item to be ready for Phase 2
-    const idx = this.queue.findIndex(i => i.id === id);
-    if (idx !== -1) {
-        this.updateItemStatus(idx, 'struct_ready');
     }
   }
 
@@ -97,29 +118,18 @@ export class QueueService {
 
     try {
       while (!this.shouldStop && !this.circuitOpen) {
-        // PRIORITY LOGIC:
-        // 1. Find items that need Structure (Phase 1)
-        // 2. Find items that need Content (Phase 2) - ONLY IF structure is ready
-        
-        // Strategy: We iterate linearly. If we hit a 'paused_for_review', we skip it.
         const nextItemIndex = this.queue.findIndex(
           item => 
              item.status === 'pending' || 
              item.status === 'error' ||
              (item.status === 'struct_ready' && (config.autoApprove || item.structure)) 
-             // Note: 'paused_for_review' items are skipped until user approves them
         );
 
-        if (nextItemIndex === -1) break; // Nothing actionable
+        if (nextItemIndex === -1) break;
 
-        const item = this.queue[nextItemIndex];
-        
-        // If item is 'struct_ready' but autoApprove is OFF, we should only process it if it was explicitly approved (which sets it to struct_ready).
-        // If it was just generated and waiting review, we need to mark it.
-        
         await this.processItem(nextItemIndex);
         
-        // Cooldown
+        // Cooldown to prevent rate limit spikes
         await new Promise(r => setTimeout(r, 1000));
       }
     } finally {
@@ -136,21 +146,12 @@ export class QueueService {
     // --- PHASE 1: BLUEPRINTING (Structure) ---
     if (item.status === 'pending' || item.status === 'error') {
         
-        // DUAL-ENGINE: Check if we have a specialized provider for structure
-        // This splits rate limits.
         const structConfig = { ...this.config };
-        
-        // If structureProvider is set, override the provider in the config passed to generators
-        // Note: The generator functions check config.structureModel internally if passed, 
-        // but we need to route to the correct service function first.
         const activeProvider = this.config.structureProvider || this.config.provider;
 
         const success = await this.executeWithRetry(index, async () => {
             this.updateItemStatus(index, 'drafting_struct');
-            
             let structure = '';
-            
-            // Route to correct service based on (Structure ProviderOverride OR Default Provider)
             if (activeProvider === AIProvider.GEMINI) {
                structure = await generateDetailedStructure(structConfig, item.topic);
             } else {
@@ -160,23 +161,20 @@ export class QueueService {
         });
 
         if (success) {
-            // DECISION POINT: AUTO-APPROVE VS REVIEW
             if (this.config.autoApprove) {
-                this.updateItemStatus(index, 'struct_ready', { structure: success, retryCount: 0 });
+                this.updateItemStatus(index, 'struct_ready', { structure: success, retryCount: 0, errorMsg: undefined });
             } else {
-                this.updateItemStatus(index, 'paused_for_review', { structure: success, retryCount: 0 });
-                return; // STOP processing this item. Move to next.
+                this.updateItemStatus(index, 'paused_for_review', { structure: success, retryCount: 0, errorMsg: undefined });
+                return; 
             }
         } else {
-            return; // Failed after retries
+            return; 
         }
     }
 
-    // Refresh item reference after Phase 1 updates
     item = this.queue[index];
 
     // --- PHASE 2: MANUFACTURING (Content) ---
-    // Content always uses the MAIN configured model (this.config.provider)
     if (item.status === 'struct_ready' && item.structure) {
         
         const success = await this.executeWithRetry(index, async () => {
@@ -194,7 +192,6 @@ export class QueueService {
         });
 
         if (success) {
-            // Save Data
             const newNote: HistoryItem = {
                 id: Date.now().toString(),
                 timestamp: Date.now(),
@@ -210,7 +207,7 @@ export class QueueService {
                 try { await this.storage.uploadNoteToCloud(newNote); newNote._status = 'synced'; } catch(e){}
             }
 
-            this.updateItemStatus(index, 'done', { retryCount: 0 });
+            this.updateItemStatus(index, 'done', { retryCount: 0, errorMsg: undefined });
         }
     }
   }
@@ -221,19 +218,17 @@ export class QueueService {
       while (attempts < MAX_RETRIES && !this.shouldStop) {
           try {
               const result = await operation();
-              this.consecutiveFailures = 0; // Reset circuit counter on success
+              this.consecutiveFailures = 0; 
               return result;
           } catch (e: any) {
               attempts++;
               console.warn(`Attempt ${attempts} failed for item ${index}:`, e);
               
-              // Update status to show retry
               this.updateItemStatus(index, this.queue[index].status, { 
                   retryCount: attempts,
                   errorMsg: `Retry ${attempts}/${MAX_RETRIES}: ${e.message}` 
               });
 
-              // Circuit Breaker Logic
               this.consecutiveFailures++;
               if (this.consecutiveFailures >= CIRCUIT_THRESHOLD) {
                   this.circuitOpen = true;
@@ -242,13 +237,11 @@ export class QueueService {
                   return null;
               }
 
-              // Exponential Backoff
               const delay = BASE_DELAY * Math.pow(2, attempts);
               await new Promise(r => setTimeout(r, delay));
           }
       }
       
-      // If we get here, all retries failed
       this.updateItemStatus(index, 'error', { errorMsg: "Max Retries Exceeded" });
       return null;
   }

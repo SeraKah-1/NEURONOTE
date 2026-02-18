@@ -14,7 +14,6 @@ const getGroqClient = (apiKeyString: string) => {
       if (keys.length > 0) {
           const randomIndex = Math.floor(Math.random() * keys.length);
           finalKey = keys[randomIndex];
-          // console.log(`[Groq] Rotating Key Pool. Using Key #${randomIndex + 1}`);
       }
   }
 
@@ -24,18 +23,47 @@ const getGroqClient = (apiKeyString: string) => {
   });
 };
 
+/**
+ * Fetch available models from Groq API
+ * Equivalent to Python: requests.get("https://api.groq.com/openai/v1/models", ...)
+ */
+export const fetchGroqModels = async (apiKeyString: string): Promise<{id: string, object: string}[]> => {
+    let finalKey = apiKeyString;
+    if (finalKey.includes(',') || finalKey.includes('\n')) {
+        finalKey = finalKey.split(/[\n,]+/).map(k => k.trim())[0]; // Use first key for fetching list
+    }
+
+    if (!finalKey) return [];
+
+    try {
+        const response = await fetch("https://api.groq.com/openai/v1/models", {
+            method: "GET",
+            headers: {
+                "Authorization": `Bearer ${finalKey}`,
+                "Content-Type": "application/json"
+            }
+        });
+
+        if (!response.ok) {
+            throw new Error(`Groq API Error: ${response.statusText}`);
+        }
+
+        const data = await response.json();
+        return data.data || [];
+    } catch (error) {
+        console.error("Failed to fetch dynamic Groq models:", error);
+        return [];
+    }
+};
+
 export const getAvailableGroqModels = async (config: GenerationConfig) => {
-  const apiKey = config.groqApiKey || process.env.GROQ_API_KEY;
+  const envKey = (import.meta as any).env?.VITE_GROQ_API_KEY || (typeof process !== 'undefined' ? process.env.GROQ_API_KEY : '');
+  const apiKey = config.groqApiKey || envKey;
   if (!apiKey) return [];
 
-  try {
-    const groq = getGroqClient(apiKey);
-    const list = await groq.models.list();
-    return list.data;
-  } catch (error) {
-    console.error("Failed to fetch Groq models:", error);
-    return [];
-  }
+  // Use the new fetch function
+  const models = await fetchGroqModels(apiKey);
+  return models;
 };
 
 export const generateNoteContentGroq = async (
@@ -45,7 +73,8 @@ export const generateNoteContentGroq = async (
   onProgress: (status: string) => void
 ): Promise<string> => {
   
-  const apiKey = config.groqApiKey || process.env.GROQ_API_KEY;
+  const envKey = (import.meta as any).env?.VITE_GROQ_API_KEY || (typeof process !== 'undefined' ? process.env.GROQ_API_KEY : '');
+  const apiKey = config.groqApiKey || envKey;
 
   if (!apiKey) {
     throw new Error("Groq API Key is missing. Please enter it in Settings.");
@@ -126,7 +155,8 @@ export const generateDetailedStructureGroq = async (
   config: GenerationConfig,
   topic: string
 ): Promise<string> => {
-  const apiKey = config.groqApiKey || process.env.GROQ_API_KEY;
+  const envKey = (import.meta as any).env?.VITE_GROQ_API_KEY || (typeof process !== 'undefined' ? process.env.GROQ_API_KEY : '');
+  const apiKey = config.groqApiKey || envKey;
   if (!apiKey) throw new Error("Groq API Key Missing");
 
   const groq = getGroqClient(apiKey);
@@ -168,7 +198,8 @@ export const parseSyllabusFromTextGroq = async (
   config: GenerationConfig,
   rawText: string
 ): Promise<SyllabusItem[]> => {
-  const apiKey = config.groqApiKey || process.env.GROQ_API_KEY;
+  const envKey = (import.meta as any).env?.VITE_GROQ_API_KEY || (typeof process !== 'undefined' ? process.env.GROQ_API_KEY : '');
+  const apiKey = config.groqApiKey || envKey;
   if (!apiKey) throw new Error("Groq API Key Missing");
   
   const groq = getGroqClient(apiKey);
@@ -222,7 +253,8 @@ export const refineNoteContentGroq = async (
   currentContent: string,
   instruction: string
 ): Promise<string> => {
-  const apiKey = config.groqApiKey || process.env.GROQ_API_KEY;
+  const envKey = (import.meta as any).env?.VITE_GROQ_API_KEY || (typeof process !== 'undefined' ? process.env.GROQ_API_KEY : '');
+  const apiKey = config.groqApiKey || envKey;
   if (!apiKey) throw new Error("Groq API Key Missing");
 
   const groq = getGroqClient(apiKey);

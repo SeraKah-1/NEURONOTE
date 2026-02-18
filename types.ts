@@ -1,32 +1,74 @@
 
+export interface KnowledgeSource {
+  id: string;
+  name: string;
+  type: 'drive' | 'local_folder' | 'pdf_collection' | 'local_file'; // Added local_file
+  status: 'syncing' | 'ready' | 'error' | 'disconnected';
+  lastSync: number;
+  fileCount: number;
+  sizeBytes: number;
+  icon?: string;
+  config?: {
+    driveFolderId?: string;
+    folderPath?: string;
+  };
+}
+
+export interface LibraryMaterial {
+  id: string;
+  created_at?: string;
+  title: string;
+  content: string; // Base64 or Raw Text
+  processed_content?: string; // Summary/AI Processed
+  file_type: string;
+  tags?: string[];
+  size?: number; // Optional helper for UI
+}
+
+export interface KnowledgeFile {
+  id: string;
+  sourceId: string;
+  name: string;
+  type: string;
+  size: number;
+  indexed: boolean; // aka isTokenized
+  contentSnippet?: string; // First 100 chars for preview
+  vectorId?: string; // Future proofing for true RAG
+  data?: string; // NEW: Base64 data for local RAG usage
+}
+
+export enum NoteMode {
+  GENERAL = 'general',
+  CHEAT_CODES = 'cheat_codes',
+  COMPREHENSIVE = 'comprehensive',
+  CUSTOM = 'custom'
+}
+
 export enum AIProvider {
   GEMINI = 'gemini',
   GROQ = 'groq'
 }
 
 export enum AppModel {
-  // --- GEMINI MODELS (Deep Reasoning & Multimodal) ---
-  GEMINI_3_PRO = 'gemini-3-pro-preview',         // Top Tier Reasoning
-  GEMINI_3_FLASH = 'gemini-3-flash-preview',     // Balanced
-  GEMINI_2_5_PRO = 'gemini-2.5-pro',             // Stable High Intelligence
-  GEMINI_2_5_FLASH = 'gemini-2.5-flash',         // Fast Production
-  GEMINI_2_5_FLASH_LITE = 'gemini-2.5-flash-lite', // Cost Effective
-  GEMINI_1_5_PRO = 'gemini-1.5-pro',             // Legacy High Context
-  GEMINI_1_5_FLASH = 'gemini-1.5-flash',         // Legacy Fast
-
-  // --- GROQ MODELS (Extreme Speed LPU) ---
-  GROQ_LLAMA_4_MAVERICK_17B = 'meta-llama/llama-4-maverick-17b-128e-instruct', 
-  GROQ_LLAMA_3_3_70B = 'llama-3.3-70b-versatile', // Best Open Source Overall
-  GROQ_LLAMA_3_1_8B = 'llama-3.1-8b-instant',     // Fastest
-  GROQ_MIXTRAL_8X7B = 'mixtral-8x7b-32768',       // High Context
-  GROQ_GEMMA2_9B = 'gemma2-9b-it'                 // Google Efficient
-}
-
-export enum NoteMode {
-  GENERAL = 'general',      // STANDARD
-  CHEAT_CODES = 'cheat_codes', // CHEAT SHEET
-  COMPREHENSIVE = 'comprehensive', // NEW: TEXTBOOK STYLE
-  CUSTOM = 'custom'         // CUSTOM
+  // --- GEMINI 3 SERIES ---
+  GEMINI_3_PRO = 'gemini-3-pro-preview',
+  GEMINI_3_FLASH = 'gemini-3-flash-preview',
+  GEMINI_3_PRO_IMAGE = 'gemini-3-pro-image-preview', // Nano Banana Pro
+  
+  // --- GEMINI 2.5 SERIES ---
+  GEMINI_2_5_PRO = 'gemini-2.5-pro',
+  GEMINI_2_5_FLASH = 'gemini-2.5-flash',
+  GEMINI_2_5_FLASH_LITE = 'gemini-2.5-flash-lite',
+  
+  // --- SPECIALIZED ---
+  DEEP_RESEARCH_PRO = 'deep-research-pro-preview-12-2025',
+  GEMINI_2_0_FLASH = 'gemini-2.0-flash', // Deprecated fallback
+  
+  // --- GROQ (Defaults, will be fetched dynamically) ---
+  GROQ_LLAMA_3_3_70B = 'llama-3.3-70b-versatile',
+  GROQ_LLAMA_3_1_8B = 'llama-3.1-8b-instant',
+  GROQ_MIXTRAL_8X7B = 'mixtral-8x7b-32768',
+  GROQ_GEMMA2_9B = 'gemma2-9b-it'
 }
 
 export enum StorageType {
@@ -34,25 +76,79 @@ export enum StorageType {
   SUPABASE = 'supabase'
 }
 
-export enum AppView {
-  WORKSPACE = 'workspace',
-  SETTINGS = 'settings',
-  ARCHIVE = 'archive',
-  SYLLABUS = 'syllabus',
-  KNOWLEDGE = 'knowledge' 
-}
-
-export enum AppTheme {
-  CLINICAL_CLEAN = 'clinical_clean', // REPLACES NEURO DARK
-  ACADEMIC_PAPER = 'academic_paper',
-  SEPIA_FOCUS = 'sepia_focus'
-}
-
 export interface UploadedFile {
   name: string;
   mimeType: string;
-  data: string; // Base64
-  isTokenized?: boolean; // NEW: Indicates if file is vector-ready
+  data: string;
+  isTokenized?: boolean;
+}
+
+export interface GenerationConfig {
+  provider: AIProvider;
+  model: string;
+  temperature: number;
+  apiKey: string;
+  groqApiKey?: string;
+  mode: NoteMode;
+  storageType: StorageType;
+  supabaseUrl?: string;
+  supabaseKey?: string;
+  autoApprove?: boolean;
+  customContentPrompt?: string;
+  structureModel?: string;
+  structureProvider?: AIProvider;
+  customStructurePrompt?: string;
+}
+
+export interface SyllabusItem {
+  id: string;
+  topic: string;
+  status: 'pending' | 'drafting_struct' | 'struct_ready' | 'generating_note' | 'done' | 'paused_for_review' | 'error';
+  structure?: string;
+  retryCount?: number;
+  errorMsg?: string;
+}
+
+export interface ChatMessage {
+  role: 'user' | 'model';
+  content: string;
+}
+
+export interface NoteData {
+  topic: string;
+  files: UploadedFile[];
+  structure: string;
+}
+
+export enum AppView {
+  WORKSPACE = 'workspace',
+  SYLLABUS = 'syllabus',
+  KNOWLEDGE = 'knowledge',
+  ARCHIVE = 'archive',
+  SETTINGS = 'settings',
+  CANVAS = 'canvas'
+}
+
+export interface AppState {
+  isLoading: boolean;
+  generatedContent: string | null;
+  error: string | null;
+  progressStep: string;
+  currentView: AppView;
+  activeNoteId: string | null;
+}
+
+export interface HistoryItem {
+  id: string;
+  timestamp: number;
+  topic: string;
+  mode: NoteMode;
+  content: string;
+  provider: AIProvider;
+  parentId: string | null;
+  folderId?: string;
+  tags?: string[];
+  _status?: 'local' | 'synced' | 'cloud';
 }
 
 export interface Folder {
@@ -67,123 +163,6 @@ export interface SavedPrompt {
   content: string;
 }
 
-export interface HistoryItem {
-  id: string;
-  timestamp: number;
-  topic: string;
-  mode: NoteMode;
-  content: string;
-  provider: AIProvider;
-  parentId?: string | null; // For threading/continuations
-  tags?: string[];
-  _status?: 'local' | 'cloud' | 'synced';
-  folderId?: string | null; 
-}
-
-export interface ChatMessage {
-  role: 'user' | 'model';
-  content: string;
-}
-
-export interface NoteData {
-  topic: string;
-  files: UploadedFile[];
-  structure: string;
-}
-
-export interface GenerationConfig {
-  provider: AIProvider;
-  model: AppModel | string; // Allow string for flexibility
-  temperature: number;
-  apiKey: string;
-  groqApiKey: string;
-  mode: NoteMode;
-  storageType: StorageType;
-  supabaseUrl: string;
-  supabaseKey: string;
-  autoApprove: boolean; // Toggle for Human-in-the-Loop
-  
-  // --- BATCH ENGINE ADVANCED CONFIG ---
-  structureProvider?: AIProvider; // Specific provider for Phase 1
-  structureModel?: string;        // Specific model for Phase 1
-  customStructurePrompt?: string; // Override system instruction for Phase 1
-  customContentPrompt?: string;   // Append instruction for Phase 2
-}
-
-export interface AppState {
-  isLoading: boolean;
-  generatedContent: string | null;
-  error: string | null;
-  progressStep: string;
-  currentView: AppView;
-  activeNoteId: string | null;
-}
-
-// --- KNOWLEDGE BASE TYPES ---
-export interface KnowledgeSource {
-  id: string;
-  name: string;
-  type: 'drive' | 'local_folder' | 'pdf_collection';
-  status: 'syncing' | 'ready' | 'error' | 'disconnected';
-  lastSync: number;
-  fileCount: number;
-  sizeBytes: number;
-  icon?: string;
-  config?: {
-    driveFolderId?: string;
-    folderPath?: string;
-  };
-}
-
-export interface KnowledgeFile {
-  id: string;
-  sourceId: string;
-  name: string;
-  type: string;
-  size: number;
-  indexed: boolean; // aka isTokenized
-  contentSnippet?: string; // First 100 chars for preview
-  vectorId?: string; // Future proofing for true RAG
-}
-
-export const MODE_STRUCTURES: Record<NoteMode, string> = {
-  [NoteMode.GENERAL]: `# 1. KENAPA PENTING? (Clinical Relevance & Urgency)
-# 2. BIG PICTURE (Definisi & Tujuan Utama)
-# 3. KOMPONEN & MEKANISME (Bagaimana Cara Kerjanya?)
-# 4. GEJALA KLINIS (Dampak Jika Rusak)
-# 5. MANAJEMEN KILAT (Solusi)`,
-  [NoteMode.CHEAT_CODES]: `# 1. HIGH YIELD FACTS (Sering Keluar Ujian)
-# 2. MNEMONICS (Jembatan Keledai)
-# 3. TABEL PERBANDINGAN
-# 4. JEBAKAN SOAL`,
-  [NoteMode.COMPREHENSIVE]: `# 1. FUNDAMENTAL & DEFINISI (Deep Dive)
-# 2. PATOFISIOLOGI & MEKANISME MOLEKULER
-# 3. MANIFESTASI KLINIS & DIAGNOSIS BANDING
-# 4. TATALAKSANA KOMPREHENSIF (Farmako & Non-Farmako)
-# 5. KOMPLIKASI & PROGNOSIS
-# 6. EVIDENCE BASED MEDICINE (Studi Terbaru)`,
-  [NoteMode.CUSTOM]: `# Custom Structure`
-};
-
-export type SyllabusStatus = 
-  'pending' | 
-  'drafting_struct' | 
-  'struct_ready' | // Paused here if autoApprove is false
-  'generating_note' | 
-  'done' | 
-  'error' | 
-  'active' |
-  'paused_for_review'; // Explicit pause state
-
-export interface SyllabusItem {
-  id: string;
-  topic: string;
-  status: SyllabusStatus;
-  structure?: string; // Cached structure from Phase 1
-  errorMsg?: string;
-  retryCount?: number; // Robustness tracking
-}
-
 export interface SavedQueue {
   id: string;
   name: string;
@@ -191,11 +170,11 @@ export interface SavedQueue {
   timestamp: number;
 }
 
-export interface QuizQuestion {
-  question: string;
-  options: string[];
-  correctIndex: number;
-  explanation: string;
+export interface EncryptedPayload {
+  geminiKey?: string;
+  groqKey?: string;
+  supabaseUrl?: string;
+  supabaseKey?: string;
 }
 
 export interface NeuroKeyFile {
@@ -212,9 +191,22 @@ export interface NeuroKeyFile {
   };
 }
 
-export interface EncryptedPayload {
-  geminiKey?: string;
-  groqKey?: string;
-  supabaseUrl?: string;
-  supabaseKey?: string;
+export interface QuizQuestion {
+  question: string;
+  options: string[];
+  correctIndex: number;
+  explanation: string;
 }
+
+export enum AppTheme {
+  CLINICAL_CLEAN = 'clinical_clean',
+  ACADEMIC_PAPER = 'academic_paper',
+  SEPIA_FOCUS = 'sepia_focus'
+}
+
+export const MODE_STRUCTURES: Record<NoteMode, string> = {
+  [NoteMode.GENERAL]: "# 1. Definition\n# 2. Pathophysiology\n# 3. Clinical Features\n# 4. Diagnosis\n# 5. Management",
+  [NoteMode.CHEAT_CODES]: "# 1. Mnemonics\n# 2. High Yield Facts\n# 3. Exam Buzzwords",
+  [NoteMode.COMPREHENSIVE]: "# 1. Introduction\n# 2. Epidemiology\n# 3. Etiology\n# 4. Pathophysiology\n# 5. Clinical Manifestations\n# 6. Diagnostics\n# 7. Treatment\n# 8. Prognosis",
+  [NoteMode.CUSTOM]: "# Custom Structure"
+};

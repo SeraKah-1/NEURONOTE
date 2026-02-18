@@ -1,3 +1,4 @@
+
 import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import { HistoryItem, Folder } from '../types';
 import { StorageService } from '../services/storageService';
@@ -21,12 +22,12 @@ const FileSystem: React.FC<FileSystemProps> = ({ onSelectNote, activeNoteId }) =
   const [storage] = useState(StorageService.getInstance());
   
   // Navigation State
-  const [activeTab, setActiveTab] = useState<'recent' | 'library'>('library'); // Default to library for structure
+  const [activeTab, setActiveTab] = useState<'recent' | 'library'>('library');
   
   // Tree State
   const [expandedFolders, setExpandedFolders] = useState<Record<string, boolean>>({});
-  const [collapsedGroups, setCollapsedGroups] = useState<Record<string, boolean>>({}); // For Recent tab
-  const [activeMenuId, setActiveMenuId] = useState<string | null>(null); // For popup menu
+  const [collapsedGroups, setCollapsedGroups] = useState<Record<string, boolean>>({}); 
+  const [activeMenuId, setActiveMenuId] = useState<string | null>(null); 
 
   // Drag & Drop State
   const [draggedNoteId, setDraggedNoteId] = useState<string | null>(null);
@@ -34,11 +35,12 @@ const FileSystem: React.FC<FileSystemProps> = ({ onSelectNote, activeNoteId }) =
 
   const menuRef = useRef<HTMLDivElement>(null);
 
-  // --- CORE: DATA LOADER ---
-  const refreshData = useCallback(async () => {
+  // --- CORE: DATA LOADER (OPTIMIZED) ---
+  const refreshData = useCallback(() => {
     setLoading(true);
     try {
-        const n = await storage.getUnifiedNotes();
+        // PERF FIX: Load metadata ONLY. Do not load full content strings into the list view.
+        const n = storage.getLocalNotesMetadata();
         n.sort((a, b) => b.timestamp - a.timestamp);
         setNotes([...n]);
         
@@ -51,7 +53,6 @@ const FileSystem: React.FC<FileSystemProps> = ({ onSelectNote, activeNoteId }) =
     }
   }, [storage]);
 
-  // Initial Load & Outside Click Handler
   useEffect(() => {
     refreshData();
     
@@ -69,7 +70,7 @@ const FileSystem: React.FC<FileSystemProps> = ({ onSelectNote, activeNoteId }) =
     if (confirm(`🗑️ Delete "${note.topic}"?`)) {
       try {
           if (note._status === 'cloud' || note._status === 'synced') await storage.deleteNoteFromCloud(note.id);
-          if (note._status === 'local' || note._status === 'synced') storage.deleteNoteLocal(note.id);
+          if (note._status === 'local' || note._status === 'synced') await storage.deleteNoteLocal(note.id);
           refreshData();
       } catch(err) { alert("Error deleting note."); }
     }
@@ -88,7 +89,6 @@ const FileSystem: React.FC<FileSystemProps> = ({ onSelectNote, activeNoteId }) =
     if (name && name.trim()) {
       const newFolder: Folder = { id: Date.now().toString(), name: name.trim(), timestamp: Date.now() };
       storage.saveFolder(newFolder);
-      // Auto expand the new folder (though it's empty)
       setExpandedFolders(prev => ({...prev, [newFolder.id]: true}));
       refreshData();
     }
@@ -107,7 +107,6 @@ const FileSystem: React.FC<FileSystemProps> = ({ onSelectNote, activeNoteId }) =
           refreshData();
           setDraggedNoteId(null);
           setDragOverFolderId(null);
-          // Auto expand target folder
           if (targetFolderId) setExpandedFolders(prev => ({...prev, [targetFolderId]: true}));
       }
   };
@@ -123,7 +122,6 @@ const FileSystem: React.FC<FileSystemProps> = ({ onSelectNote, activeNoteId }) =
           folderMap[f.id] = notes.filter(n => n.folderId === f.id && (searchQuery ? n.topic.toLowerCase().includes(searchQuery.toLowerCase()) : true));
       });
 
-      // Sort folders alphabetically
       const sortedFolders = [...folders].sort((a, b) => a.name.localeCompare(b.name));
 
       return { rootNotes, sortedFolders, folderMap };
@@ -157,7 +155,7 @@ const FileSystem: React.FC<FileSystemProps> = ({ onSelectNote, activeNoteId }) =
 
 
   // --- SUB-COMPONENT: NOTE ROW ---
-  const NoteRow: React.FC<{ note: HistoryItem; depth?: number }> = ({ note, depth = 0 }) => {
+  const NoteRow: React.FC<{ note: HistoryItem; depth?: number }> = React.memo(({ note, depth = 0 }) => {
       const isActive = activeNoteId === note.id;
       
       return (
@@ -201,7 +199,7 @@ const FileSystem: React.FC<FileSystemProps> = ({ onSelectNote, activeNoteId }) =
               )}
           </div>
       );
-  };
+  });
 
   return (
     <div className="flex flex-col h-full bg-[var(--ui-sidebar)] rounded-xl border border-[var(--ui-border)] overflow-hidden">

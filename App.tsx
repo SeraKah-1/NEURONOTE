@@ -1,9 +1,9 @@
 
 import React, { useState, useEffect, Suspense } from 'react';
-import { BrainCircuit, Settings2, Sparkles, BookOpen, Layers, Zap, AlertCircle, X, Key, GraduationCap, Microscope, Puzzle, Database, HardDrive, Cloud, Layout, Activity, FlaskConical, ListChecks, Bell, HelpCircle, Copy, Check, ShieldCheck, Cpu, Unlock, Download, RefreshCw, User, Lock, Server, PenTool, Wand2, ChevronRight, FileText, FolderOpen, Trash2, CheckCircle2, Circle, Command, Bot, Maximize2, Home, Projector, Minimize2, Component, Save, BookTemplate, ChevronDown, ChevronUp, MessageSquarePlus, Library, Palette, Sun, Moon, Coffee, Network, LogOut } from 'lucide-react';
+import { BrainCircuit, Settings2, Sparkles, BookOpen, Layers, Zap, AlertCircle, X, Key, GraduationCap, Microscope, Puzzle, Database, HardDrive, Cloud, Layout, Activity, FlaskConical, ListChecks, Bell, HelpCircle, Copy, Check, ShieldCheck, Cpu, Unlock, Download, RefreshCw, User, Lock, Server, PenTool, Wand2, ChevronRight, FileText, FolderOpen, Trash2, CheckCircle2, Circle, Command, Bot, Maximize2, Home, Projector, Minimize2, Component, Save, BookTemplate, ChevronDown, ChevronUp, MessageSquarePlus, Library, Palette, Sun, Moon, Coffee, Network, LogOut, Map, ArrowLeftFromLine, ArrowRightFromLine, Filter } from 'lucide-react';
 import { AppModel, AppState, NoteData, GenerationConfig, MODE_STRUCTURES, NoteMode, HistoryItem, AIProvider, StorageType, AppView, EncryptedPayload, SavedPrompt, AppTheme } from './types';
 import { generateNoteContent, generateDetailedStructure } from './services/geminiService';
-import { generateNoteContentGroq, getAvailableGroqModels, generateDetailedStructureGroq } from './services/groqService';
+import { generateNoteContentGroq, fetchGroqModels, generateDetailedStructureGroq } from './services/groqService';
 import { StorageService } from './services/storageService';
 import { NotificationService } from './services/notificationService';
 import FileUploader from './components/FileUploader';
@@ -18,81 +18,22 @@ import ErrorBoundary from './components/ErrorBoundary';
 // LAZY LOAD OPTIMIZATION:
 const OutputDisplay = React.lazy(() => import('./components/OutputDisplay'));
 const AdminPanel = React.lazy(() => import('./components/AdminPanel'));
-// GraphView removed for performance and minimalism
 const KnowledgeBase = React.lazy(() => import('./components/KnowledgeBase'));
 
-const SUPABASE_SETUP_SQL = `
--- RUN THIS IN SUPABASE SQL EDITOR --
-
--- 1. Enable Vector Extension (pgvector)
-create extension if not exists vector;
-
--- 2. Create Notes Table
-create table if not exists public.neuro_notes (
-  id text primary key,
-  timestamp bigint,
-  topic text,
-  mode text,
-  content text,
-  provider text,
-  tags text[]
-);
-
--- 3. Create Vector Store (The Brain)
-create table if not exists public.document_embeddings (
-  id bigserial primary key,
-  content text,
-  metadata jsonb,
-  embedding vector(1536) -- Compatible with OpenAI/Gemini/Groq embeddings
-);
-
--- 4. Search Function
-create or replace function match_documents (
-  query_embedding vector(1536),
-  match_threshold float,
-  match_count int
-)
-returns table (
-  id bigint,
-  content text,
-  metadata jsonb,
-  similarity float
-)
-language sql stable
-as $$
-  select
-    id,
-    content,
-    metadata,
-    1 - (embedding <=> query_embedding) as similarity
-  from document_embeddings
-  where 1 - (embedding <=> query_embedding) > match_threshold
-  order by similarity desc
-  limit match_count;
-$$;
-
--- 5. Security (Allow All for Demo)
-alter table public.neuro_notes enable row level security;
-alter table public.document_embeddings enable row level security;
-create policy "God Mode Notes" on public.neuro_notes for all using (true) with check (true);
-create policy "God Mode Vectors" on public.document_embeddings for all using (true) with check (true);
-
--- 6. Enable Realtime
-alter publication supabase_realtime add table public.neuro_notes;
-`.trim();
-
+// UPDATED MODEL LIST (Based on latest available)
 const GEMINI_MODELS = [
-  { value: AppModel.GEMINI_3_PRO, label: 'Gemini 3.0 Pro (Thinking)', badge: 'Reasoning' },
-  { value: AppModel.GEMINI_3_FLASH, label: 'Gemini 3.0 Flash', badge: 'Fast' },
+  { value: AppModel.GEMINI_3_PRO, label: 'Gemini 3.0 Pro', badge: 'Flagship' },
+  { value: AppModel.GEMINI_3_FLASH, label: 'Gemini 3.0 Flash', badge: 'Fastest' },
   { value: AppModel.GEMINI_2_5_PRO, label: 'Gemini 2.5 Pro', badge: 'Stable' },
-  { value: AppModel.GEMINI_2_5_FLASH, label: 'Gemini 2.5 Flash', badge: 'Production' },
+  { value: AppModel.GEMINI_2_5_FLASH, label: 'Gemini 2.5 Flash', badge: 'Balanced' },
+  { value: AppModel.GEMINI_2_5_FLASH_LITE, label: 'Gemini 2.5 Flash-Lite', badge: 'Budget' },
+  { value: AppModel.DEEP_RESEARCH_PRO, label: 'Deep Research Pro', badge: 'Agentic' },
 ];
+
 const INITIAL_GROQ_MODELS = [
-  { value: AppModel.GROQ_LLAMA_4_MAVERICK_17B, label: 'Llama 4 Maverick 17B', badge: 'New' },
   { value: AppModel.GROQ_LLAMA_3_3_70B, label: 'Llama 3.3 70B', badge: 'Versatile' },
-  { value: AppModel.GROQ_LLAMA_3_1_8B, label: 'Llama 3.1 8B', badge: 'Fastest' },
-  { value: AppModel.GROQ_MIXTRAL_8X7B, label: 'Mixtral 8x7B', badge: 'Logic' },
-  { value: AppModel.GROQ_GEMMA2_9B, label: 'Gemma 2 9B', badge: 'Google' },
+  { value: AppModel.GROQ_LLAMA_3_1_8B, label: 'Llama 3.1 8B', badge: 'Instant' },
+  { value: AppModel.GROQ_MIXTRAL_8X7B, label: 'Mixtral 8x7B', badge: 'Complex' },
 ];
 
 const AppContent: React.FC = () => {
@@ -100,12 +41,15 @@ const AppContent: React.FC = () => {
   const [showPalette, setShowPalette] = useState(false);
   const [focusMode, setFocusMode] = useState(false);
   const [showTemplates, setShowTemplates] = useState(false);
-  const [showCustomPrompt, setShowCustomPrompt] = useState(false);
+  const [showAdvancedOptions, setShowAdvancedOptions] = useState(false); // Collapsible Advanced Config
   const [currentTheme, setCurrentTheme] = useState<AppTheme>(AppTheme.CLINICAL_CLEAN);
+  
+  // Navigation State
+  const [navCollapsed, setNavCollapsed] = useState(false);
   
   const [config, setConfig] = useState<GenerationConfig>({
     provider: AIProvider.GEMINI,
-    model: AppModel.GEMINI_3_FLASH, 
+    model: AppModel.GEMINI_2_5_FLASH, 
     temperature: 0.4,
     apiKey: '', 
     groqApiKey: '', 
@@ -114,7 +58,8 @@ const AppContent: React.FC = () => {
     supabaseUrl: '',
     supabaseKey: '',
     autoApprove: true,
-    customContentPrompt: '' 
+    customContentPrompt: '',
+    customStructurePrompt: '' 
   });
 
   const [noteData, setNoteData] = useState<NoteData>({
@@ -128,12 +73,12 @@ const AppContent: React.FC = () => {
     generatedContent: null,
     error: null,
     progressStep: '',
-    currentView: AppView.WORKSPACE,
+    currentView: AppView.WORKSPACE, // Default View is HOME/WORKSPACE
     activeNoteId: null
   });
 
   const [isStructLoading, setIsStructLoading] = useState(false);
-  const [groqModels, setGroqModels] = useState(INITIAL_GROQ_MODELS);
+  const [groqModels, setGroqModels] = useState<{value: string, label: string, badge: string}[]>(INITIAL_GROQ_MODELS);
   const [settingsTab, setSettingsTab] = useState<'keys' | 'storage' | 'appearance'>('keys'); 
   const [storageService] = useState(StorageService.getInstance());
   const [notificationService] = useState(NotificationService.getInstance());
@@ -143,13 +88,15 @@ const AppContent: React.FC = () => {
 
   // --- SESSION PERSISTENCE (AUTO LOGIN) ---
   useEffect(() => {
-      // 1. Check LocalStorage for Session Keys
-      // This allows users to skip the "Card" step if they've logged in recently on this device
       const localGeminiKey = localStorage.getItem('neuro_gemini_key');
       const localGroqKey = localStorage.getItem('neuro_groq_key');
       const localSbUrl = localStorage.getItem('neuro_sb_url');
       const localSbKey = localStorage.getItem('neuro_sb_key');
       
+      // Load saved preferences
+      const savedProvider = localStorage.getItem('neuro_pref_provider');
+      const savedModel = localStorage.getItem('neuro_pref_model');
+
       if (localGeminiKey || localGroqKey) {
           setConfig(prev => ({
               ...prev,
@@ -157,122 +104,110 @@ const AppContent: React.FC = () => {
               groqApiKey: localGroqKey || prev.groqApiKey,
               supabaseUrl: localSbUrl || prev.supabaseUrl,
               supabaseKey: localSbKey || prev.supabaseKey,
-              provider: localGeminiKey ? AIProvider.GEMINI : AIProvider.GROQ
+              provider: (savedProvider as AIProvider) || (localGeminiKey ? AIProvider.GEMINI : AIProvider.GROQ),
+              model: savedModel || prev.model
           }));
-          setIsAuthenticated(true); // Auto-login bypass
-          console.log("⚡ Auto-login via Persistent Session");
+          setIsAuthenticated(true);
       }
 
-      // 2. Load other settings
       if (localSbUrl && localSbKey) { storageService.initSupabase(localSbUrl, localSbKey); }
       setSavedTemplates(storageService.getTemplates());
       const savedTheme = localStorage.getItem('neuro_theme');
       if (savedTheme) { setCurrentTheme(savedTheme as AppTheme); }
   }, []);
 
+  // --- PERSIST PREFERENCES ---
+  useEffect(() => {
+      if (isAuthenticated) {
+          localStorage.setItem('neuro_pref_provider', config.provider);
+          localStorage.setItem('neuro_pref_model', config.model);
+      }
+  }, [config.provider, config.model, isAuthenticated]);
+
+  // --- DYNAMIC GROQ FETCH ---
+  useEffect(() => {
+      const fetchGroq = async () => {
+          if (config.groqApiKey) {
+              const models = await fetchGroqModels(config.groqApiKey);
+              if (models.length > 0) {
+                  const formatted = models.map(m => ({
+                      value: m.id,
+                      label: m.id.replace('groq-', '').replace('llama', 'Llama'),
+                      badge: 'Cloud'
+                  }));
+                  // Merge with defaults to keep "badge" info for core models, but update IDs if needed
+                  const merged: { value: string; label: string; badge: string; }[] = [...INITIAL_GROQ_MODELS];
+                  formatted.forEach(f => {
+                      if (!merged.find(m => m.value === f.value)) merged.push(f);
+                  });
+                  setGroqModels(merged);
+              }
+          }
+      };
+      if (isAuthenticated) fetchGroq();
+  }, [config.groqApiKey, isAuthenticated]);
+
   const handleLogout = () => {
       if(confirm("End Session? This will require the NeuroKey Card to unlock again.")) {
           localStorage.removeItem('neuro_gemini_key');
           localStorage.removeItem('neuro_groq_key');
-          localStorage.removeItem('neuro_sb_url');
-          localStorage.removeItem('neuro_sb_key');
           window.location.reload();
       }
   };
 
+  // Keyboard Shortcuts
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
       if ((e.metaKey || e.ctrlKey) && e.key === 'k') { e.preventDefault(); setShowPalette(prev => !prev); }
       if (focusMode && e.key === 'Escape' && !showPalette) { setFocusMode(false); }
+      if ((e.metaKey || e.ctrlKey) && e.key === 'b') { e.preventDefault(); setNavCollapsed(prev => !prev); }
     };
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
   }, [focusMode, showPalette]);
 
+  // Handlers
   const handleAuthUnlock = (payload: EncryptedPayload) => {
     setConfig(prev => ({ ...prev, apiKey: payload.geminiKey || prev.apiKey, groqApiKey: payload.groqKey || prev.groqApiKey, supabaseUrl: payload.supabaseUrl || prev.supabaseUrl, supabaseKey: payload.supabaseKey || prev.supabaseKey, storageType: (payload.supabaseUrl && payload.supabaseKey) ? StorageType.SUPABASE : StorageType.LOCAL }));
-    
-    // PERSIST KEYS TO SESSION
     if (payload.geminiKey) localStorage.setItem('neuro_gemini_key', payload.geminiKey);
     if (payload.groqKey) localStorage.setItem('neuro_groq_key', payload.groqKey);
     if (payload.supabaseUrl) localStorage.setItem('neuro_sb_url', payload.supabaseUrl);
     if (payload.supabaseKey) localStorage.setItem('neuro_sb_key', payload.supabaseKey);
-
     if (payload.supabaseUrl && payload.supabaseKey) { storageService.initSupabase(payload.supabaseUrl, payload.supabaseKey); }
     setIsAuthenticated(true);
     notificationService.requestPermissionManual();
   };
 
   const handleThemeChange = (theme: AppTheme) => { setCurrentTheme(theme); localStorage.setItem('neuro_theme', theme); };
-
-  useEffect(() => {
-    const fetchModels = async () => {
-      if (config.provider === AIProvider.GROQ && config.groqApiKey) {
-        const models = await getAvailableGroqModels(config);
-        if (models && models.length > 0) {
-          const merged = models.map((m: any) => {
-            const existing = INITIAL_GROQ_MODELS.find(im => im.value === m.id);
-            return existing || { value: m.id, label: m.id.split('/').pop(), badge: 'API' };
-          });
-          setGroqModels(merged);
-        }
-      }
-    };
-    fetchModels();
-  }, [config.provider, config.groqApiKey]);
-
-  const handleSaveTemplate = () => { 
-      if (savedTemplates.length >= 5) {
-          alert("LIMIT REACHED: Maximum 5 templates allowed. Please delete old ones.");
-          return;
-      }
-      const name = prompt("Name:"); 
-      if (name) { 
-          const t: SavedPrompt = { id: Date.now().toString(), name: name.trim(), content: noteData.structure }; 
-          storageService.saveTemplate(t); 
-          setSavedTemplates(storageService.getTemplates()); 
-          setShowTemplates(false); 
-      } 
-  };
-  const handleLoadTemplate = (t: SavedPrompt) => { setNoteData(prev => ({...prev, structure: t.content})); setShowTemplates(false); };
-  const handleDeleteTemplate = (id: string, e: React.MouseEvent) => { e.stopPropagation(); if(confirm("Delete?")) { storageService.deleteTemplate(id); setSavedTemplates(storageService.getTemplates()); } };
-
-  const handleManualSave = async (contentToSave: string) => {
-    if (!noteData.topic) return alert("Missing Topic");
-    const noteId = appState.activeNoteId || Date.now().toString();
-    const newItem: HistoryItem = { id: noteId, timestamp: Date.now(), topic: noteData.topic, mode: config.mode, content: contentToSave, provider: config.provider, parentId: null };
-    storageService.saveNoteLocal(newItem);
-    setAppState(prev => ({ ...prev, activeNoteId: noteId }));
-    notificationService.send("Note Saved", `"${noteData.topic}" saved successfully.`, "save-complete");
-  };
-
-  const handleUpdateContent = (newContent: string) => { setAppState(prev => ({ ...prev, generatedContent: newContent })); };
   
-  // Updated Key Saver with Persistence Logic
   const handleSaveApiKey = (rawValue: string, type: 'gemini' | 'groq' | 'sb_url' | 'sb_key') => { 
       const key = rawValue.trim(); 
-      if (type === 'gemini') {
-          setConfig(prev => ({ ...prev, apiKey: key })); 
-          localStorage.setItem('neuro_gemini_key', key);
-      } else if (type === 'groq') {
-          setConfig(prev => ({ ...prev, groqApiKey: key })); 
-          localStorage.setItem('neuro_groq_key', key);
-      } else if (type === 'sb_url') {
-          setConfig(prev => ({ ...prev, supabaseUrl: key }));
-          localStorage.setItem('neuro_sb_url', key);
-      }
-      else if (type === 'sb_key') {
-          setConfig(prev => ({ ...prev, supabaseKey: key }));
-          localStorage.setItem('neuro_sb_key', key);
-      }
+      if (type === 'gemini') { setConfig(prev => ({ ...prev, apiKey: key })); localStorage.setItem('neuro_gemini_key', key); }
+      else if (type === 'groq') { setConfig(prev => ({ ...prev, groqApiKey: key })); localStorage.setItem('neuro_groq_key', key); }
+      else if (type === 'sb_url') { setConfig(prev => ({ ...prev, supabaseUrl: key })); localStorage.setItem('neuro_sb_url', key); }
+      else if (type === 'sb_key') { setConfig(prev => ({ ...prev, supabaseKey: key })); localStorage.setItem('neuro_sb_key', key); }
   };
-  
-  const handleProviderSwitch = (provider: AIProvider) => { setConfig(prev => ({ ...prev, provider })); if (provider === AIProvider.GEMINI) { setConfig(prev => ({ ...prev, model: AppModel.GEMINI_3_FLASH })); } else { setConfig(prev => ({ ...prev, model: AppModel.GROQ_LLAMA_3_3_70B })); } };
+
+  const handleSelectNoteFromFileSystem = async (note: HistoryItem) => {
+    setAppState(prev => ({ ...prev, isLoading: true }));
+    try {
+        const fullContent = await storageService.getNoteContent(note.id);
+        setAppState(prev => ({ 
+            ...prev, 
+            currentView: AppView.WORKSPACE, 
+            generatedContent: fullContent || note.content || "Error loading content.", 
+            activeNoteId: note.id,
+            isLoading: false
+        })); 
+        setNoteData(prev => ({...prev, topic: note.topic})); 
+        setConfig(prev => ({...prev, mode: note.mode}));
+    } catch (e) {
+        setAppState(prev => ({ ...prev, isLoading: false, error: "Failed to load note content." }));
+    }
+  };
 
   const handleGenerate = async () => {
     if (!noteData.topic.trim() || !noteData.structure.trim()) { setAppState(prev => ({ ...prev, error: "Topic & Structure required." })); return; }
-    if (config.provider === AIProvider.GROQ && !config.groqApiKey) { setAppState(prev => ({...prev, error: "Groq Key missing."})); return; }
-    if (config.provider === AIProvider.GEMINI && !config.apiKey) { setAppState(prev => ({...prev, error: "Gemini Key missing."})); return; }
     setAppState(prev => ({ ...prev, isLoading: true, generatedContent: null, error: null, progressStep: 'Initializing...', activeNoteId: null }));
     try {
       let content = '';
@@ -282,408 +217,336 @@ const AppContent: React.FC = () => {
     } catch (err: any) { setAppState(prev => ({ ...prev, isLoading: false, generatedContent: null, error: err.message, progressStep: '', })); }
   };
 
-  const handleAutoStructure = async () => { if (!noteData.topic) return alert("Enter Topic first."); setIsStructLoading(true); try { let struct = ''; if (config.provider === AIProvider.GEMINI) { struct = await generateDetailedStructure(config, noteData.topic); } else { if(!config.groqApiKey) { alert("Groq Key needed."); setIsStructLoading(false); return; } struct = await generateDetailedStructureGroq(config, noteData.topic); } setNoteData(prev => ({ ...prev, structure: struct })); } catch (e: any) { alert("Error: " + e.message); } finally { setIsStructLoading(false); } };
-  const handleCopySQL = () => { navigator.clipboard.writeText(SUPABASE_SETUP_SQL); setSqlCopied(true); setTimeout(() => setSqlCopied(false), 2000); };
-  const handleSelectSyllabusTopic = (topic: string) => { setNoteData(prev => ({ ...prev, topic: topic })); setAppState(prev => ({ ...prev, currentView: AppView.WORKSPACE })); };
-  const handleSelectNoteFromFileSystem = (note: HistoryItem) => { setAppState(prev => ({ ...prev, currentView: AppView.WORKSPACE, generatedContent: note.content, activeNoteId: note.id })); setNoteData(prev => ({...prev, topic: note.topic})); setConfig(prev => ({...prev, mode: note.mode})); };
-  const handleRetrieveFromCloud = (note: HistoryItem) => { storageService.saveNoteLocal({...note, parentId: null}); alert(`✅ Downloaded "${note.topic}".`); setAppState(prev => ({ ...prev, currentView: AppView.WORKSPACE, activeNoteId: note.id })); };
-  const setView = (view: AppView) => { setAppState(prev => ({ ...prev, currentView: view })); };
-  const handleModeSwitch = (mode: NoteMode) => { setConfig(prev => ({ ...prev, mode })); if (appState.currentView === AppView.SYLLABUS) setView(AppView.WORKSPACE); setNoteData(prev => ({ ...prev, structure: MODE_STRUCTURES[mode] })); };
+  // --- CONTENT HANDLERS ---
+  const handleUpdateContent = (newContent: string) => {
+    setAppState(prev => ({ ...prev, generatedContent: newContent }));
+  };
 
-  // --- ICONS HELPERS ---
-  const getModeIcon = (mode: NoteMode) => {
-    switch (mode) {
-      case NoteMode.CHEAT_CODES: return <Zap size={18} className="text-amber-400" />;
-      case NoteMode.COMPREHENSIVE: return <Library size={18} className="text-emerald-400" />;
-      case NoteMode.CUSTOM: return <PenTool size={18} className="text-pink-400" />;
-      default: return <GraduationCap size={18} className="text-[var(--ui-primary)]" />;
+  const handleManualSave = async (content: string) => {
+    const currentId = appState.activeNoteId;
+    const noteToSave: HistoryItem = {
+      id: currentId || Date.now().toString(),
+      timestamp: Date.now(),
+      topic: noteData.topic,
+      mode: config.mode,
+      content: content,
+      provider: config.provider,
+      parentId: null,
+      tags: [],
+      _status: 'local'
+    };
+
+    if (currentId) {
+      const existingMeta = storageService.getLocalNotesMetadata().find(n => n.id === currentId);
+      if (existingMeta) {
+        Object.assign(noteToSave, {
+          ...existingMeta,
+          content: content,
+          timestamp: Date.now()
+        });
+      }
+    }
+
+    await storageService.saveNoteLocal(noteToSave);
+
+    if ((noteToSave._status === 'synced' || noteToSave._status === 'cloud') && storageService.isCloudReady()) {
+      try {
+        await storageService.uploadNoteToCloud(noteToSave);
+      } catch (e) {
+        console.warn("Cloud sync failed during manual save", e);
+      }
+    }
+
+    if (!currentId) {
+      setAppState(prev => ({ ...prev, activeNoteId: noteToSave.id }));
     }
   };
-  const getModeLabel = (mode: NoteMode) => { switch (mode) { case NoteMode.CHEAT_CODES: return "Cheat Sheet"; case NoteMode.COMPREHENSIVE: return "Comprehensive"; case NoteMode.CUSTOM: return "Custom"; default: return "Standard"; } };
+
+  // --- SUB-COMPONENTS ---
+
+  const PrimaryNavButton: React.FC<{ view: AppView, icon: any, label: string }> = ({ view, icon: Icon, label }) => (
+      <button 
+        onClick={() => setAppState(prev => ({ ...prev, currentView: view }))}
+        className={`w-10 h-10 rounded-xl flex items-center justify-center transition-all duration-300 group relative
+        ${appState.currentView === view ? 'bg-[var(--ui-primary)] text-white shadow-lg shadow-[var(--ui-primary)]/30' : 'text-[var(--ui-text-muted)] hover:bg-[var(--ui-sidebar-secondary)] hover:text-[var(--ui-text-main)]'}`}
+      >
+          <Icon size={20} />
+          {/* Tooltip */}
+          <div className="absolute left-14 bg-[var(--ui-text-main)] text-[var(--ui-bg)] text-[10px] font-bold px-2 py-1 rounded opacity-0 group-hover:opacity-100 transition-opacity whitespace-nowrap pointer-events-none z-50">
+              {label}
+          </div>
+      </button>
+  );
 
   if (!isAuthenticated) { return <LoginGate onUnlock={handleAuthUnlock} />; }
 
   return (
-    // ROOT APP CONTAINER with THEME CLASS
-    <div className={`min-h-screen flex flex-col md:flex-row font-sans overflow-hidden transition-colors duration-300 theme-${currentTheme} bg-[var(--ui-bg)] text-[var(--ui-text-main)]`}>
+    <div className={`min-h-screen flex font-sans overflow-hidden transition-colors duration-300 theme-${currentTheme} bg-[var(--ui-bg)] text-[var(--ui-text-main)]`}>
       
       <CommandPalette 
         isOpen={showPalette} 
         onClose={() => setShowPalette(false)}
-        onNavigate={(v) => setView(v)}
-        onChangeMode={handleModeSwitch}
-        onChangeProvider={handleProviderSwitch}
+        onNavigate={(v) => setAppState(prev => ({...prev, currentView: v}))}
+        onChangeMode={(m) => setConfig(prev => ({...prev, mode: m}))}
+        onChangeProvider={(p) => setConfig(prev => ({...prev, provider: p}))}
         onSelectNote={handleSelectNoteFromFileSystem}
         toggleFocusMode={() => setFocusMode(!focusMode)}
         isFocusMode={focusMode}
       />
 
-      {/* --- SIDEBAR --- */}
-      <aside className={`w-full md:w-[280px] lg:w-[320px] p-5 flex flex-col shrink-0 z-30 h-screen overflow-hidden shadow-sm border-r border-[var(--ui-border)] bg-[var(--ui-sidebar)] transition-all duration-300 ${focusMode ? 'hidden md:hidden' : 'block'}`}>
-        
-        {/* Header Logo */}
-        <div className="flex items-center space-x-3 mb-6 shrink-0 select-none cursor-pointer group px-2" onClick={() => setView(AppView.WORKSPACE)}>
-          <div className="w-10 h-10 bg-[var(--ui-primary)] rounded-xl flex items-center justify-center shadow-lg group-hover:scale-105 transition-transform">
-             <BrainCircuit className="text-white" size={22} />
-          </div>
-          <div className="flex flex-col">
-            <h1 className="text-lg font-bold text-[var(--ui-text-main)] tracking-tight leading-none">NeuroNote</h1>
-            <span className="text-[10px] font-medium text-[var(--ui-text-muted)] uppercase tracking-widest mt-1">PKM System</span>
-          </div>
-        </div>
-
-        {/* Sidebar Content */}
-        {appState.currentView === AppView.SETTINGS ? (
-           /* SETTINGS VIEW */
-           <div className="flex-1 flex flex-col animate-fade-in overflow-hidden">
-             <div className="flex items-center justify-between mb-6 pb-2 border-b border-[var(--ui-border)] text-[var(--ui-primary)] px-1">
-               <div className="flex items-center space-x-2">
-                 <Settings2 size={16} /> <h3 className="font-bold text-xs uppercase tracking-wider">Configuration</h3>
-               </div>
+      {/* --- 1. PRIMARY SIDEBAR (Icon Strip) --- */}
+      <aside className={`w-[70px] h-screen bg-[var(--ui-sidebar)] border-r border-[var(--ui-border)] flex flex-col items-center py-6 shrink-0 z-40 transition-all ${focusMode ? '-translate-x-full absolute' : 'relative'}`}>
+         <div className="mb-8">
+             <div className="w-10 h-10 bg-[var(--ui-primary)] rounded-xl flex items-center justify-center shadow-lg shadow-[var(--ui-primary)]/20">
+                 <BrainCircuit className="text-white" size={22} />
              </div>
-             
-             <div className="flex bg-[var(--ui-bg)] p-1 rounded-lg mb-6 shrink-0 gap-1 border border-[var(--ui-border)]">
-                {['keys', 'storage', 'appearance'].map(tab => (
-                    <button key={tab} onClick={() => setSettingsTab(tab as any)} className={`flex-1 py-1.5 text-[9px] font-bold uppercase tracking-wide rounded-md transition-all ${settingsTab === tab ? 'bg-[var(--ui-primary)] text-white shadow-sm' : 'text-[var(--ui-text-muted)] hover:text-[var(--ui-text-main)]'}`}>
-                        {tab}
-                    </button>
-                ))}
-             </div>
+         </div>
 
-             <div className="flex-1 overflow-y-auto custom-scrollbar space-y-4 px-1">
-               {settingsTab === 'keys' && (
-                 <div className="space-y-4 animate-slide-up">
-                   {/* Inputs styled with Theme Variables */}
-                   {['Gemini', 'Groq'].map(p => (
-                       <div key={p} className="space-y-2">
-                         <label className="text-xs text-[var(--ui-text-muted)] font-medium flex items-center gap-2">{p === 'Gemini' ? <Sparkles size={12}/> : <Cpu size={12}/>} {p} API Key</label>
-                         <input type="password" value={p === 'Gemini' ? config.apiKey : config.groqApiKey} onChange={(e) => handleSaveApiKey(e.target.value, p.toLowerCase() as any)} className="w-full bg-[var(--ui-bg)] border border-[var(--ui-border)] text-[var(--ui-text-main)] rounded-lg p-3 text-xs font-mono outline-none focus:border-[var(--ui-primary)]" />
-                       </div>
-                   ))}
-                   
-                   {/* Logout / Clear Session */}
-                   <button onClick={handleLogout} className="w-full flex items-center justify-center gap-2 mt-4 py-2 border border-red-500/30 text-red-500 hover:bg-red-500/10 rounded-lg text-xs font-bold transition-all">
-                       <LogOut size={12}/> Clear Session & Lock
-                   </button>
-                 </div>
-               )}
+         <div className="flex flex-col gap-4 flex-1">
+             <PrimaryNavButton view={AppView.WORKSPACE} icon={Home} label="Workspace" />
+             <PrimaryNavButton view={AppView.SYLLABUS} icon={ListChecks} label="Syllabus" />
+             <PrimaryNavButton view={AppView.KNOWLEDGE} icon={Database} label="Knowledge" />
+             <PrimaryNavButton view={AppView.ARCHIVE} icon={Cloud} label="Vault" />
+         </div>
 
-               {settingsTab === 'storage' && (
-                  <div className="space-y-4 animate-slide-up">
-                     <p className="text-[10px] text-[var(--ui-text-muted)]">Configure Cloud Archive</p>
-                     <div className="space-y-3 pt-2">
-                        <input type="text" value={config.supabaseUrl} onChange={(e) => handleSaveApiKey(e.target.value, 'sb_url')} placeholder="Supabase URL" className="w-full bg-[var(--ui-bg)] border border-[var(--ui-border)] rounded-lg p-2 text-xs text-[var(--ui-text-main)] outline-none" />
-                        <input type="password" value={config.supabaseKey} onChange={(e) => handleSaveApiKey(e.target.value, 'sb_key')} placeholder="Supabase Anon Key" className="w-full bg-[var(--ui-bg)] border border-[var(--ui-border)] rounded-lg p-2 text-xs text-[var(--ui-text-main)] outline-none" />
-                     </div>
-                     <button onClick={handleCopySQL} className="text-[10px] text-[var(--ui-primary)] hover:underline flex items-center gap-1">
-                        {sqlCopied ? <Check size={10}/> : <Copy size={10} />} Copy SQL Schema
-                     </button>
-                  </div>
-               )}
-
-               {settingsTab === 'appearance' && (
-                  <div className="space-y-4 animate-slide-up">
-                      <p className="text-[10px] text-[var(--ui-text-muted)]">Customize Experience</p>
-                      {/* Theme Cards */}
-                      {[
-                          { id: AppTheme.CLINICAL_CLEAN, name: 'Clinical Clean', desc: 'Default. Professional Light.', icon: Activity, color: 'text-blue-500', bg: 'bg-white' },
-                          { id: AppTheme.ACADEMIC_PAPER, name: 'Academic Paper', desc: 'Serif fonts. Minimalist.', icon: FileText, color: 'text-gray-800', bg: 'bg-gray-50' },
-                          { id: AppTheme.SEPIA_FOCUS, name: 'Sepia Focus', desc: 'Warm tones. Eye care.', icon: Coffee, color: 'text-[#b58900]', bg: 'bg-[#fdf6e3] border-[#d3cbb7]' }
-                      ].map(t => (
-                          <div key={t.id} onClick={() => handleThemeChange(t.id)} className={`p-3 rounded-xl border cursor-pointer transition-all flex items-center gap-3 ${currentTheme === t.id ? 'bg-[var(--ui-primary-glow)] border-[var(--ui-primary)] shadow-lg' : 'bg-[var(--ui-bg)] border-[var(--ui-border)] hover:border-[var(--ui-text-muted)]'}`}>
-                             <div className={`w-10 h-10 rounded-full flex items-center justify-center shrink-0 border ${t.bg} ${currentTheme === t.id ? 'border-[var(--ui-primary)]' : 'border-transparent'}`}>
-                                <t.icon size={18} className={t.color}/>
-                             </div>
-                             <div>
-                                <h4 className="text-xs font-bold text-[var(--ui-text-main)]">{t.name}</h4>
-                                <p className="text-[10px] text-[var(--ui-text-muted)]">{t.desc}</p>
-                             </div>
-                          </div>
-                      ))}
-                  </div>
-               )}
-             </div>
-             <button onClick={() => setView(AppView.WORKSPACE)} className="mt-4 w-full py-3 bg-[var(--ui-border)] hover:bg-[var(--ui-bg)] text-[var(--ui-text-main)] text-xs font-bold uppercase rounded-lg flex items-center justify-center gap-2"><ChevronRight size={14} /> Back</button>
-           </div>
-        ) : (
-           /* MAIN SIDEBAR (Files + Tools) */
-           <div className="flex-1 flex flex-col overflow-hidden">
-             
-             <div className="flex-1 overflow-hidden flex flex-col mb-4">
-                <FileSystem onSelectNote={handleSelectNoteFromFileSystem} activeNoteId={appState.activeNoteId} />
-             </div>
-
-             <div className="border-t border-[var(--ui-border)] pt-4 space-y-2 shrink-0">
-               {[
-                   { v: AppView.WORKSPACE, label: 'Main Menu', icon: Home },
-                   { v: AppView.KNOWLEDGE, label: 'Knowledge Base', icon: Database }, 
-                   { v: AppView.ARCHIVE, label: 'Neural Vault', icon: Cloud },
-               ].map(btn => (
-                   <button key={btn.label} onClick={() => setView(btn.v)} className={`w-full flex items-center gap-3 p-2.5 rounded-lg hover:bg-[var(--ui-bg)] text-[var(--ui-text-muted)] hover:text-[var(--ui-text-main)] transition-colors ${appState.currentView === btn.v ? 'bg-[var(--ui-bg)] font-bold text-[var(--ui-text-main)] border border-[var(--ui-border)]' : ''}`}>
-                       <btn.icon size={16} className={appState.currentView === btn.v ? 'text-[var(--ui-primary)]' : ''}/> <span className="text-xs">{btn.label}</span>
-                   </button>
-               ))}
-
-               <div className="grid grid-cols-2 gap-2 mt-2">
-                 <button onClick={() => setView(AppView.SETTINGS)} className="flex flex-col items-center justify-center space-y-1 p-2 rounded-lg hover:bg-[var(--ui-bg)] text-[var(--ui-text-muted)] hover:text-[var(--ui-text-main)] border border-transparent hover:border-[var(--ui-border)]">
-                    <Settings2 size={16} /> <span className="text-[9px] font-bold">CONFIG</span>
-                 </button>
-                 <button onClick={() => setView(AppView.SYLLABUS)} className="flex flex-col items-center justify-center space-y-1 p-2 rounded-lg hover:bg-[var(--ui-bg)] text-[var(--ui-text-muted)] hover:text-[var(--ui-text-main)] border border-transparent hover:border-[var(--ui-border)]">
-                    <ListChecks size={16} /> <span className="text-[9px] font-bold">SYLLABUS</span>
-                 </button>
-               </div>
-               
-               <button onClick={() => setShowAdminModal(true)} className="w-full flex items-center gap-3 p-2 rounded-lg hover:bg-[var(--ui-bg)] text-[var(--ui-text-muted)] hover:text-red-400 transition-colors mt-2 border border-transparent hover:border-red-900/30">
-                  <ShieldCheck size={16} /> <span className="text-xs font-bold">Admin Forge</span>
-               </button>
-             </div>
-           </div>
-        )}
+         <div className="flex flex-col gap-4">
+             <button onClick={() => setShowAdminModal(true)} className="w-10 h-10 rounded-xl flex items-center justify-center text-[var(--ui-text-muted)] hover:text-red-500 hover:bg-red-50 transition-colors"><ShieldCheck size={20}/></button>
+             <PrimaryNavButton view={AppView.SETTINGS} icon={Settings2} label="Settings" />
+         </div>
       </aside>
 
-      {/* --- MAIN CONTENT AREA --- */}
+      {/* --- 2. SECONDARY SIDEBAR (Context/File Tree) --- */}
+      <aside className={`w-[280px] h-screen bg-[var(--ui-sidebar-secondary)] border-r border-[var(--ui-border)] flex flex-col transition-all duration-300 ${focusMode || navCollapsed ? 'w-0 opacity-0 overflow-hidden' : 'w-[280px] opacity-100'} z-30`}>
+          <div className="p-4 flex items-center justify-between border-b border-[var(--ui-border)] bg-[var(--ui-sidebar)] h-[60px] shrink-0">
+              <h3 className="font-bold text-sm text-[var(--ui-text-main)] uppercase tracking-wider">Explorer</h3>
+              <button onClick={() => setNavCollapsed(true)} className="text-[var(--ui-text-muted)] hover:text-[var(--ui-text-main)]"><ArrowLeftFromLine size={16}/></button>
+          </div>
+          <div className="flex-1 overflow-hidden p-2">
+              <FileSystem onSelectNote={handleSelectNoteFromFileSystem} activeNoteId={appState.activeNoteId} />
+          </div>
+      </aside>
+
+      {/* --- 3. MAIN CANVAS --- */}
       <main className="flex-1 relative h-screen overflow-hidden flex flex-col bg-[var(--ui-bg)]">
-        
-        {focusMode && (
-           <button onClick={() => setFocusMode(false)} className="absolute top-4 right-4 z-50 p-3 bg-[var(--ui-sidebar)] hover:bg-[var(--ui-border)] text-[var(--ui-text-main)] rounded-full border border-[var(--ui-border)] shadow-xl backdrop-blur-md transition-all hover:scale-110 group">
-             <Minimize2 size={20} className="group-hover:text-[var(--ui-primary)] transition-colors"/>
-           </button>
-        )}
+         
+         {/* Collapsed Nav Toggle */}
+         {navCollapsed && !focusMode && (
+             <button onClick={() => setNavCollapsed(false)} className="absolute top-4 left-4 z-50 p-2 bg-[var(--ui-surface)] border border-[var(--ui-border)] rounded-lg shadow-sm text-[var(--ui-text-muted)] hover:text-[var(--ui-text-main)]">
+                 <ArrowRightFromLine size={16}/>
+             </button>
+         )}
 
-        <div className={`relative z-10 flex-1 flex flex-col h-full ${'p-4 md:p-8 lg:p-10 overflow-y-auto custom-scrollbar'} ${focusMode ? 'px-[15%] pt-10' : 'pb-20 md:pb-10'}`}>
-          
-          {!focusMode && (
-            <div className="flex justify-between items-start mb-6 shrink-0">
-               <div>
-                  <h2 className="text-2xl md:text-3xl font-bold text-[var(--ui-text-main)] tracking-tight flex items-center gap-3">
-                     {appState.currentView === AppView.SYLLABUS ? <ListChecks className="text-[var(--ui-primary)]"/> : 
-                      appState.currentView === AppView.ARCHIVE ? <Cloud className="text-[var(--ui-primary)]"/> : 
-                      appState.currentView === AppView.KNOWLEDGE ? <Database className="text-[var(--ui-primary)]"/> :
-                      <Sparkles className="text-[var(--ui-primary)]"/>}
-                     
-                     {appState.currentView === AppView.SYLLABUS ? 'Syllabus Manager' : 
-                      appState.currentView === AppView.ARCHIVE ? 'Neural Vault' : 
-                      appState.currentView === AppView.KNOWLEDGE ? 'Knowledge Base' :
-                      'Workspace'}
-                  </h2>
-                  <p className="text-[var(--ui-text-muted)] text-sm mt-1 font-medium">
-                    {appState.generatedContent ? `Editing: ${noteData.topic}` : 'Medical Knowledge Generator'}
-                  </p>
-               </div>
+         {/* Focus Mode Exit */}
+         {focusMode && (
+             <button onClick={() => setFocusMode(false)} className="absolute top-4 right-4 z-50 p-3 bg-[var(--ui-surface)] hover:bg-[var(--ui-border)] text-[var(--ui-text-main)] rounded-full border border-[var(--ui-border)] shadow-xl backdrop-blur-md transition-all hover:scale-110 group">
+                 <Minimize2 size={20} className="group-hover:text-[var(--ui-primary)] transition-colors"/>
+             </button>
+         )}
 
-               <div className="flex items-center gap-3">
-                 <button onClick={() => setShowPalette(true)} className="hidden md:flex items-center gap-2 px-3 py-1.5 bg-[var(--ui-sidebar)] border border-[var(--ui-border)] rounded-lg text-xs text-[var(--ui-text-muted)] hover:text-[var(--ui-text-main)] hover:border-[var(--ui-primary)] transition-all">
-                    <Command size={12}/> <span className="font-mono">Cmd+K</span>
-                 </button>
+         {/* --- CONTENT AREA --- */}
+         <div className={`relative z-10 flex-1 flex flex-col h-full ${focusMode ? 'px-[15%] pt-10' : 'p-6 md:p-8'} overflow-hidden`}>
+             
+             {/* Header (Hidden in Zen Mode) */}
+             {!focusMode && appState.currentView === AppView.WORKSPACE && !appState.generatedContent && (
+                 <div className="flex justify-between items-start mb-8 shrink-0 animate-fade-in">
+                     <div>
+                         <h2 className="text-3xl font-extrabold text-[var(--ui-text-main)] tracking-tight">
+                             Workspace
+                         </h2>
+                         <p className="text-[var(--ui-text-muted)] text-sm mt-1 font-medium">
+                             Medical Knowledge Generator
+                         </p>
+                     </div>
+                     <button onClick={() => setShowPalette(true)} className="hidden md:flex items-center gap-2 px-4 py-2 bg-[var(--ui-surface)] border border-[var(--ui-border)] rounded-full text-xs text-[var(--ui-text-muted)] hover:text-[var(--ui-text-main)] hover:border-[var(--ui-primary)] transition-all shadow-sm">
+                         <Command size={12}/> <span className="font-mono">Cmd+K</span>
+                     </button>
+                 </div>
+             )}
 
-                 {appState.generatedContent && (
-                   <button 
-                      onClick={() => {
-                         setAppState(prev => ({ ...prev, generatedContent: null, currentView: AppView.WORKSPACE, activeNoteId: null }));
-                         setNoteData(prev => ({...prev, topic: ''}));
-                      }}
-                      className="px-4 py-2 bg-[var(--ui-sidebar)] hover:bg-[var(--ui-border)] text-[var(--ui-text-main)] text-xs font-bold uppercase rounded-lg border border-[var(--ui-border)] transition-all shadow-lg flex items-center gap-2"
-                   >
-                      <X size={14} /> Close
-                   </button>
+             {/* LOADING */}
+             {appState.isLoading && (
+                 <div className="absolute inset-0 flex flex-col items-center justify-center bg-[var(--ui-bg)] z-50">
+                     <div className="w-16 h-16 border-4 border-[var(--ui-border)] rounded-full border-t-[var(--ui-primary)] animate-spin mb-4"></div>
+                     <p className="text-[var(--ui-text-muted)] text-sm animate-pulse">{appState.progressStep || 'Processing...'}</p>
+                 </div>
+             )}
+
+             {/* ERROR */}
+             {appState.error && (
+                 <div className="mb-6 bg-red-50 border border-red-200 text-red-600 p-4 rounded-xl flex items-start space-x-3 animate-fade-in">
+                     <AlertCircle size={20}/>
+                     <span>{appState.error}</span>
+                 </div>
+             )}
+
+             {/* VIEW ROUTING */}
+             <div className="flex-1 overflow-y-auto custom-scrollbar h-full relative">
+                 
+                 {appState.currentView === AppView.ARCHIVE && <NeuralVault onSelectNote={handleSelectNoteFromFileSystem} onImportCloud={() => {}} />}
+                 
+                 {appState.currentView === AppView.KNOWLEDGE && (
+                     <div className="h-full flex flex-col border border-[var(--ui-border)] rounded-2xl bg-[var(--ui-surface)] overflow-hidden shadow-sm">
+                         <Suspense fallback={<div>Loading...</div>}><KnowledgeBase /></Suspense>
+                     </div>
                  )}
-               </div>
-            </div>
-          )}
 
-          {/* ... Error & Loading states ... */}
-          {appState.error && <div className="mb-6 bg-red-900/20 border border-red-500/30 text-red-400 p-4 rounded-xl flex items-start space-x-3">{appState.error}</div>}
-          {appState.isLoading && <div className="flex flex-col items-center justify-center flex-1 space-y-6 animate-fade-in pb-20 text-[var(--ui-text-muted)]"><div className="w-16 h-16 border-4 border-[var(--ui-border)] rounded-full border-t-[var(--ui-primary)] animate-spin"></div><p>Processing...</p></div>}
+                 {appState.currentView === AppView.SYLLABUS && <SyllabusFlow config={config} onSelectTopic={(t) => { setNoteData(prev => ({...prev, topic: t})); setAppState(prev => ({...prev, currentView: AppView.WORKSPACE})); }} />}
 
-          {/* VIEWS */}
-          
-          {!appState.isLoading && appState.currentView === AppView.ARCHIVE && <div className="flex-1 animate-slide-up h-full flex flex-col"><NeuralVault onSelectNote={handleSelectNoteFromFileSystem} onImportCloud={handleRetrieveFromCloud} /></div>}
-          
-          {/* KNOWLEDGE BASE VIEW */}
-          {!appState.isLoading && appState.currentView === AppView.KNOWLEDGE && (
-              <div className="flex-1 animate-slide-up h-full flex flex-col border border-[var(--ui-border)] rounded-xl bg-[var(--ui-bg)] overflow-hidden shadow-sm">
-                 <Suspense fallback={<div>Loading KB...</div>}>
-                    <KnowledgeBase />
-                 </Suspense>
-              </div>
-          )}
-          
-          {!appState.isLoading && appState.generatedContent && (
-             <div className="flex-1 animate-slide-up h-full">
-               <Suspense fallback={<div>Loading Editor...</div>}>
-                  <OutputDisplay 
-                    content={appState.generatedContent} 
-                    topic={noteData.topic} 
-                    noteId={appState.activeNoteId || undefined}
-                    config={config} // PASS CONFIG HERE
-                    onUpdateContent={handleUpdateContent}
-                    onManualSave={handleManualSave}
-                    theme={currentTheme} 
-                  />
-               </Suspense>
+                 {appState.currentView === AppView.SETTINGS && (
+                     /* SETTINGS PANEL (Simplified) */
+                     <div className="max-w-2xl mx-auto space-y-6 animate-slide-up pb-20">
+                         <h2 className="text-xl font-bold text-[var(--ui-text-main)] border-b border-[var(--ui-border)] pb-2">Configuration</h2>
+                         
+                         {/* API Keys */}
+                         <div className="bg-[var(--ui-surface)] p-6 rounded-2xl border border-[var(--ui-border)] shadow-sm space-y-4">
+                             <h3 className="font-bold text-sm text-[var(--ui-text-main)] flex items-center gap-2"><Key size={16}/> API Credentials</h3>
+                             <div className="space-y-3">
+                                 <div>
+                                     <label className="text-xs font-bold text-[var(--ui-text-muted)]">Gemini API Key</label>
+                                     <input type="password" value={config.apiKey} onChange={e => handleSaveApiKey(e.target.value, 'gemini')} className="w-full mt-1 p-2 rounded-lg border border-[var(--ui-border)] bg-[var(--ui-bg)] text-xs" />
+                                 </div>
+                                 <div>
+                                     <label className="text-xs font-bold text-[var(--ui-text-muted)]">Groq API Key</label>
+                                     <input type="password" value={config.groqApiKey} onChange={e => handleSaveApiKey(e.target.value, 'groq')} className="w-full mt-1 p-2 rounded-lg border border-[var(--ui-border)] bg-[var(--ui-bg)] text-xs" />
+                                 </div>
+                             </div>
+                         </div>
+
+                         {/* Theme */}
+                         <div className="bg-[var(--ui-surface)] p-6 rounded-2xl border border-[var(--ui-border)] shadow-sm space-y-4">
+                             <h3 className="font-bold text-sm text-[var(--ui-text-main)] flex items-center gap-2"><Palette size={16}/> Visual Theme</h3>
+                             <div className="grid grid-cols-3 gap-3">
+                                 {[AppTheme.CLINICAL_CLEAN, AppTheme.ACADEMIC_PAPER, AppTheme.SEPIA_FOCUS].map(t => (
+                                     <button key={t} onClick={() => handleThemeChange(t)} className={`p-3 rounded-xl border text-xs font-bold capitalize ${currentTheme === t ? 'border-[var(--ui-primary)] bg-[var(--ui-primary)]/5 text-[var(--ui-primary)]' : 'border-[var(--ui-border)] hover:bg-[var(--ui-bg)]'}`}>
+                                         {t.replace('_', ' ')}
+                                     </button>
+                                 ))}
+                             </div>
+                         </div>
+                     </div>
+                 )}
+
+                 {appState.currentView === AppView.WORKSPACE && !appState.generatedContent && (
+                     <div className="max-w-5xl mx-auto h-full flex flex-col justify-center animate-slide-up pb-20">
+                         {/* HERO INPUT SECTION */}
+                         <div className="text-center mb-10">
+                             <div className="w-20 h-20 bg-gradient-to-br from-blue-500 to-cyan-400 rounded-3xl mx-auto flex items-center justify-center shadow-xl shadow-blue-500/20 mb-6">
+                                 <Sparkles size={40} className="text-white"/>
+                             </div>
+                             <h1 className="text-4xl font-extrabold text-[var(--ui-text-main)] mb-2">What shall we learn today?</h1>
+                             <p className="text-[var(--ui-text-muted)]">Enter a medical topic to generate a comprehensive study module.</p>
+                         </div>
+
+                         <div className="bg-[var(--ui-surface)] border border-[var(--ui-border)] p-2 rounded-2xl shadow-xl shadow-[var(--ui-shadow)] max-w-3xl mx-auto w-full flex flex-col gap-2 transition-all">
+                             <div className="flex items-center gap-2">
+                                 <div className="pl-4 text-[var(--ui-text-muted)]"><Layers size={20}/></div>
+                                 <input 
+                                     type="text" 
+                                     value={noteData.topic} 
+                                     onChange={(e) => setNoteData({...noteData, topic: e.target.value})}
+                                     placeholder="e.g. Heart Failure, Krebs Cycle, Antibiotics..."
+                                     className="flex-1 bg-transparent p-4 text-lg outline-none text-[var(--ui-text-main)] placeholder:text-gray-300 font-medium"
+                                     autoFocus
+                                 />
+                                 <div className="flex items-center gap-2 pr-2">
+                                     <button 
+                                        onClick={() => setConfig(prev => ({...prev, provider: prev.provider === AIProvider.GEMINI ? AIProvider.GROQ : AIProvider.GEMINI}))}
+                                        className="text-[10px] font-bold px-2 py-1 rounded border border-[var(--ui-border)] text-[var(--ui-text-muted)] hover:text-[var(--ui-text-main)]"
+                                        title="Switch Provider"
+                                     >
+                                         {config.provider.toUpperCase()}
+                                     </button>
+                                     <button onClick={handleGenerate} className="bg-[var(--ui-primary)] hover:opacity-90 text-white px-8 py-4 rounded-xl font-bold transition-all flex items-center gap-2">
+                                         Generate <ArrowRightFromLine size={16}/>
+                                     </button>
+                                 </div>
+                             </div>
+
+                             {/* COLLAPSIBLE ADVANCED CONTROL */}
+                             <div className="w-full px-2">
+                                 <button 
+                                    onClick={() => setShowAdvancedOptions(!showAdvancedOptions)}
+                                    className="flex items-center gap-1 text-[10px] font-bold text-[var(--ui-text-muted)] hover:text-[var(--ui-text-main)] transition-colors mb-2 ml-1"
+                                 >
+                                     <Settings2 size={10}/> {showAdvancedOptions ? 'Hide Advanced Options' : 'Show Advanced Options (Prompting)'} {showAdvancedOptions ? <ChevronUp size={10}/> : <ChevronDown size={10}/>}
+                                 </button>
+                                 
+                                 {showAdvancedOptions && (
+                                     <div className="grid grid-cols-1 md:grid-cols-2 gap-4 p-4 bg-[var(--ui-bg)] rounded-xl border border-[var(--ui-border)] animate-slide-up">
+                                         <div className="space-y-2">
+                                             <label className="text-[10px] font-bold text-[var(--ui-text-muted)] uppercase flex items-center gap-2"><Component size={12}/> Custom Blueprint Instruction</label>
+                                             <textarea 
+                                                value={config.customStructurePrompt}
+                                                onChange={(e) => setConfig({...config, customStructurePrompt: e.target.value})}
+                                                className="w-full h-20 bg-[var(--ui-surface)] border border-[var(--ui-border)] rounded-lg p-3 text-xs text-[var(--ui-text-main)] outline-none resize-none focus:border-[var(--ui-primary)]"
+                                                placeholder="Optional: Define how the syllabus/outline should be structured..."
+                                             />
+                                         </div>
+                                         <div className="space-y-2">
+                                             <label className="text-[10px] font-bold text-[var(--ui-text-muted)] uppercase flex items-center gap-2"><PenTool size={12}/> Custom Content Instruction</label>
+                                             <textarea 
+                                                value={config.customContentPrompt}
+                                                onChange={(e) => setConfig({...config, customContentPrompt: e.target.value})}
+                                                className="w-full h-20 bg-[var(--ui-surface)] border border-[var(--ui-border)] rounded-lg p-3 text-xs text-[var(--ui-text-main)] outline-none resize-none focus:border-[var(--ui-primary)]"
+                                                placeholder="Optional: Specific instructions for the writing style, language, or depth..."
+                                             />
+                                         </div>
+                                     </div>
+                                 )}
+                             </div>
+                         </div>
+
+                         {/* Quick Options */}
+                         <div className="flex justify-center mt-6 gap-4">
+                             <div className="flex items-center gap-2 px-4 py-2 bg-[var(--ui-surface)] rounded-full border border-[var(--ui-border)]">
+                                 <span className="text-[10px] font-bold text-[var(--ui-text-muted)] uppercase">Model</span>
+                                 <select 
+                                    value={config.model}
+                                    onChange={(e) => setConfig({...config, model: e.target.value})}
+                                    className="bg-transparent text-xs font-bold text-[var(--ui-text-main)] outline-none cursor-pointer max-w-[150px]"
+                                 >
+                                     {config.provider === AIProvider.GEMINI ? GEMINI_MODELS.map(m => <option key={m.value} value={m.value}>{m.label}</option>) : groqModels.map(m => <option key={m.value} value={m.value}>{m.label}</option>)}
+                                 </select>
+                             </div>
+                             
+                             <div className="flex items-center gap-2 px-4 py-2 bg-[var(--ui-surface)] rounded-full border border-[var(--ui-border)]">
+                                 <span className="text-[10px] font-bold text-[var(--ui-text-muted)] uppercase">Mode</span>
+                                 <select 
+                                    value={config.mode}
+                                    onChange={(e) => { const m = e.target.value as NoteMode; setConfig({...config, mode: m}); setNoteData({...noteData, structure: MODE_STRUCTURES[m]}); }}
+                                    className="bg-transparent text-xs font-bold text-[var(--ui-text-main)] outline-none cursor-pointer"
+                                 >
+                                     <option value={NoteMode.GENERAL}>General</option>
+                                     <option value={NoteMode.COMPREHENSIVE}>Textbook</option>
+                                     <option value={NoteMode.CHEAT_CODES}>Cheat Sheet</option>
+                                 </select>
+                             </div>
+                         </div>
+                         
+                         <div className="max-w-2xl mx-auto mt-8 w-full">
+                             <div className="text-[10px] font-bold text-[var(--ui-text-muted)] uppercase tracking-widest mb-3 text-center">Add Context (Optional)</div>
+                             <FileUploader files={noteData.files} onFilesChange={(f) => setNoteData({...noteData, files: f})} />
+                         </div>
+                     </div>
+                 )}
+
+                 {/* RESULT DISPLAY */}
+                 {appState.generatedContent && !appState.isLoading && (
+                     <Suspense fallback={<div>Loading...</div>}>
+                         <OutputDisplay 
+                            content={appState.generatedContent} 
+                            topic={noteData.topic} 
+                            noteId={appState.activeNoteId || undefined}
+                            config={config} 
+                            onUpdateContent={handleUpdateContent}
+                            onManualSave={handleManualSave}
+                            theme={currentTheme} 
+                         />
+                     </Suspense>
+                 )}
+
              </div>
-          )}
-          
-          {!appState.isLoading && appState.currentView === AppView.SYLLABUS && <SyllabusFlow config={config} onSelectTopic={handleSelectSyllabusTopic} />}
-          
-          {!appState.isLoading && appState.currentView === AppView.WORKSPACE && !appState.generatedContent && (
-            <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 h-full pb-6">
-               <div className="lg:col-span-5 flex flex-col gap-5 animate-slide-up" style={{animationDelay: '0.1s'}}>
-                 {/* Topic */}
-                 <div className="bg-[var(--ui-sidebar)] border border-[var(--ui-border)] p-5 rounded-2xl shadow-sm">
-                    <label className="text-[10px] font-bold text-[var(--ui-primary)] uppercase tracking-widest mb-3 flex items-center gap-2">
-                       <Layers size={14} /> Subject Matter
-                    </label>
-                    <input 
-                      type="text"
-                      value={noteData.topic}
-                      onChange={(e) => setNoteData({ ...noteData, topic: e.target.value })}
-                      placeholder="e.g. Heart Failure Pathophysiology"
-                      className="w-full bg-[var(--ui-bg)] border border-[var(--ui-border)] rounded-xl p-4 text-base text-[var(--ui-text-main)] focus:border-[var(--ui-primary)] outline-none transition-all placeholder-[var(--ui-text-muted)] font-medium"
-                      autoFocus
-                    />
-                 </div>
-
-                 {/* Mode */}
-                 <div className="bg-[var(--ui-sidebar)] border border-[var(--ui-border)] p-5 rounded-2xl shadow-sm">
-                    <label className="text-[10px] font-bold text-[var(--ui-text-muted)] uppercase tracking-widest mb-3 block">Instruction Mode</label>
-                    <div className="grid grid-cols-2 gap-2">
-                       {Object.values(NoteMode).map((mode) => (
-                          <button key={mode} onClick={() => handleModeSwitch(mode)} className={`p-3 rounded-xl text-xs font-bold flex flex-col items-center justify-center gap-2 border transition-all ${config.mode === mode ? 'bg-[var(--ui-primary-glow)] border-[var(--ui-primary)] text-[var(--ui-primary)]' : 'bg-[var(--ui-bg)] border-transparent text-[var(--ui-text-muted)] hover:text-[var(--ui-text-main)]'}`}>
-                             {getModeIcon(mode)} 
-                             <span className="truncate text-[10px]">{getModeLabel(mode)}</span>
-                          </button>
-                       ))}
-                    </div>
-                 </div>
-
-                 {/* Files */}
-                 <div className="bg-[var(--ui-sidebar)] border border-[var(--ui-border)] p-5 rounded-2xl shadow-sm flex-1">
-                    <label className="text-[10px] font-bold text-[var(--ui-primary)] uppercase tracking-widest flex items-center gap-2 mb-4">
-                         <FileText size={14} /> Context Data
-                    </label>
-                    <FileUploader files={noteData.files} onFilesChange={(files) => setNoteData({ ...noteData, files })} />
-                 </div>
-               </div>
-
-               <div className="lg:col-span-7 flex flex-col gap-5 animate-slide-up" style={{animationDelay: '0.2s'}}>
-                 {/* Neural Engine (RESTORED & THEMED) */}
-                 <div className="bg-[var(--ui-sidebar)] border border-[var(--ui-border)] p-5 rounded-2xl shadow-sm">
-                    <div className="flex justify-between items-center mb-3">
-                       <label className="text-[10px] font-bold text-[var(--ui-primary)] uppercase tracking-widest flex items-center gap-2">
-                         <Bot size={14} /> Neural Engine
-                       </label>
-                       {/* Provider Toggle */}
-                       <div className="flex bg-[var(--ui-bg)] p-1 rounded-lg border border-[var(--ui-border)]">
-                          <button 
-                             onClick={() => handleProviderSwitch(AIProvider.GEMINI)} 
-                             className={`px-3 py-1 rounded-md text-[10px] font-bold flex items-center gap-1.5 transition-all ${config.provider === AIProvider.GEMINI ? 'bg-indigo-600 text-white shadow' : 'text-[var(--ui-text-muted)] hover:text-[var(--ui-text-main)]'}`}
-                          >
-                             <Sparkles size={10}/> Gemini
-                          </button>
-                          <button 
-                             onClick={() => handleProviderSwitch(AIProvider.GROQ)} 
-                             className={`px-3 py-1 rounded-md text-[10px] font-bold flex items-center gap-1.5 transition-all ${config.provider === AIProvider.GROQ ? 'bg-orange-600 text-white shadow' : 'text-[var(--ui-text-muted)] hover:text-[var(--ui-text-main)]'}`}
-                          >
-                             <Cpu size={10}/> Groq
-                          </button>
-                       </div>
-                    </div>
-
-                    <div className="relative">
-                       <select 
-                          value={config.model}
-                          onChange={(e) => setConfig(prev => ({...prev, model: e.target.value as AppModel}))}
-                          className="w-full bg-[var(--ui-bg)] border border-[var(--ui-border)] rounded-xl p-3 text-xs text-[var(--ui-text-main)] font-mono outline-none focus:border-[var(--ui-primary)] appearance-none cursor-pointer hover:bg-[var(--ui-surface)] transition-colors"
-                       >
-                          {config.provider === AIProvider.GEMINI 
-                             ? GEMINI_MODELS.map(m => <option key={m.value} value={m.value}>{m.label}</option>)
-                             : groqModels.map(m => <option key={m.value} value={m.value}>{m.label}</option>)
-                          }
-                       </select>
-                       <ChevronRight size={14} className="absolute right-3 top-3.5 text-[var(--ui-text-muted)] pointer-events-none rotate-90"/>
-                    </div>
-                    
-                    {/* Model Badges */}
-                    <div className="flex justify-between items-center mt-2">
-                       <div className="flex gap-2">
-                           {(config.provider === AIProvider.GEMINI ? GEMINI_MODELS : groqModels).map(m => (
-                              m.value === config.model && (
-                                 <span key={m.value} className="text-[9px] font-bold px-2 py-0.5 rounded bg-[var(--ui-bg)] text-[var(--ui-text-muted)] border border-[var(--ui-border)]">
-                                    {m.badge}
-                                 </span>
-                              )
-                           ))}
-                       </div>
-                       
-                       <button 
-                         onClick={() => setShowCustomPrompt(!showCustomPrompt)}
-                         className={`text-[9px] font-bold uppercase flex items-center gap-1 transition-colors ${showCustomPrompt ? 'text-[var(--ui-primary)]' : 'text-[var(--ui-text-muted)] hover:text-[var(--ui-text-main)]'}`}
-                       >
-                          <MessageSquarePlus size={12}/> Custom Instruct
-                       </button>
-                    </div>
-
-                    {showCustomPrompt && (
-                        <div className="mt-3 animate-slide-up">
-                            <textarea 
-                                value={config.customContentPrompt || ''}
-                                onChange={(e) => setConfig(prev => ({...prev, customContentPrompt: e.target.value}))}
-                                className="w-full h-16 bg-[var(--ui-bg)] border border-[var(--ui-border)] rounded-lg p-2 text-[10px] text-[var(--ui-text-main)] outline-none resize-none focus:border-[var(--ui-primary)]"
-                                placeholder="Add specific instructions here (e.g. 'Use casual tone', 'Focus on drugs')..."
-                            />
-                        </div>
-                    )}
-                 </div>
-
-                 {/* Blueprint */}
-                 <div className="bg-[var(--ui-sidebar)] border border-[var(--ui-border)] p-5 rounded-2xl shadow-sm flex-1 flex flex-col min-h-[300px] relative">
-                    <div className="flex items-center justify-between mb-4">
-                       <label className="text-[10px] font-bold text-[var(--ui-primary)] uppercase tracking-widest flex items-center gap-2">
-                         <BookOpen size={14} /> Structural Blueprint
-                       </label>
-                       <div className="flex gap-2">
-                           <button onClick={() => setShowTemplates(!showTemplates)} className="flex items-center gap-2 px-3 py-1.5 rounded-lg text-[10px] font-bold uppercase transition-all bg-[var(--ui-bg)] border border-[var(--ui-border)] text-[var(--ui-text-muted)] hover:text-[var(--ui-text-main)]">
-                               <BookTemplate size={12}/> Templates
-                           </button>
-                           <button onClick={handleAutoStructure} disabled={isStructLoading || !noteData.topic} className="flex items-center gap-2 px-3 py-1.5 rounded-lg text-[10px] font-bold uppercase transition-all bg-[var(--ui-bg)] border border-[var(--ui-border)] text-[var(--ui-text-muted)] hover:text-[var(--ui-text-main)] disabled:opacity-50">
-                               {isStructLoading ? <RefreshCw size={12} className="animate-spin text-[var(--ui-primary)]"/> : <Wand2 size={12} />}
-                               {isStructLoading ? 'Drafting...' : 'Auto-Draft'}
-                           </button>
-                       </div>
-                    </div>
-                    {showTemplates && (
-                        <div className="absolute right-5 top-16 w-48 bg-[var(--ui-sidebar)] border border-[var(--ui-border)] rounded-xl shadow-2xl z-50 overflow-hidden animate-slide-up">
-                            <div className="p-2 border-b border-[var(--ui-border)] text-[10px] text-center font-bold text-[var(--ui-text-muted)]">
-                                {savedTemplates.length}/5 Slots Used
-                            </div>
-                            <div className="max-h-48 overflow-y-auto custom-scrollbar">
-                                {savedTemplates.map(t => (
-                                    <div key={t.id} onClick={() => handleLoadTemplate(t)} className="flex items-center justify-between p-2 hover:bg-[var(--ui-bg)] cursor-pointer text-xs text-[var(--ui-text-main)]">
-                                        <span>{t.name}</span>
-                                        <button onClick={(e) => handleDeleteTemplate(t.id, e)} className="text-[var(--ui-text-muted)] hover:text-red-500 p-1.5 rounded-md hover:bg-red-50 transition-colors"><Trash2 size={14}/></button>
-                                    </div>
-                                ))}
-                            </div>
-                            <button onClick={handleSaveTemplate} className="w-full py-2 bg-[var(--ui-primary)] hover:opacity-90 text-white text-[10px] font-bold uppercase flex items-center justify-center gap-2">
-                                <Save size={12}/> Save Current
-                            </button>
-                        </div>
-                    )}
-                    <textarea value={noteData.structure} onChange={(e) => setNoteData({ ...noteData, structure: e.target.value })} className="flex-1 w-full bg-[var(--ui-bg)] border border-[var(--ui-border)] rounded-xl p-5 text-sm font-mono text-[var(--ui-text-main)] placeholder-[var(--ui-text-muted)] focus:border-[var(--ui-primary)] outline-none resize-none transition-all leading-6 custom-scrollbar" placeholder="# 1. Definition..." disabled={isStructLoading} />
-                 </div>
-
-                 {/* Action */}
-                 <button onClick={handleGenerate} className="w-full py-5 rounded-xl font-bold text-white shadow-lg transition-all transform hover:scale-[1.01] active:scale-[0.99] flex items-center justify-center space-x-3 bg-[var(--ui-primary)] hover:opacity-90">
-                   <Sparkles size={20} className="animate-pulse" />
-                   <span className="tracking-widest text-sm uppercase">Initiate Sequence</span>
-                 </button>
-               </div>
-            </div>
-          )}
-        </div>
-        
-        {!focusMode && <div className="absolute bottom-3 right-5 z-50 text-[10px] text-[var(--ui-text-muted)] font-mono pointer-events-none select-none">NEURONOTE.AI // V4.0</div>}
+         </div>
       </main>
 
       {showAdminModal && <div className="fixed inset-0 z-[100] bg-black/90 backdrop-blur-xl flex items-center justify-center p-4 animate-fade-in"><div className="bg-[var(--ui-sidebar)] border border-[var(--ui-border)] rounded-2xl shadow-2xl w-full max-w-2xl overflow-hidden flex flex-col h-[85vh]"><Suspense fallback={<div>Loading Forge...</div>}><AdminPanel onClose={() => setShowAdminModal(false)} defaultMode="create" /></Suspense></div></div>}

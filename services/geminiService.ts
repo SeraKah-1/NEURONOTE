@@ -6,7 +6,10 @@ import { processGeneratedNote } from '../utils/formatter';
 
 // Helper to get authenticated AI instance with Key Rotation
 const getAIClient = (config: GenerationConfig) => {
-  let apiKey = config.apiKey || process.env.API_KEY;
+  // SAFE ENV ACCESS
+  const envKey = (import.meta as any).env?.VITE_API_KEY || (typeof process !== 'undefined' ? process.env.API_KEY : '');
+  let apiKey = config.apiKey || envKey;
+  
   if (!apiKey) {
     throw new Error("API Key is missing. Please unlock with your NeuroKey Card or check Settings.");
   }
@@ -19,7 +22,6 @@ const getAIClient = (config: GenerationConfig) => {
           // Pick a random key for simple load balancing
           const randomIndex = Math.floor(Math.random() * keys.length);
           apiKey = keys[randomIndex];
-          // console.log(`[Gemini] Rotating Key Pool (${keys.length} available). Using Key #${randomIndex + 1}`);
       }
   }
 
