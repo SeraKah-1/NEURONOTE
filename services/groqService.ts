@@ -4,10 +4,22 @@ import { GenerationConfig, SyllabusItem } from '../types';
 import { getStrictPrompt, UNIVERSAL_STRUCTURE_PROMPT } from '../utils/prompts';
 import { processGeneratedNote } from '../utils/formatter';
 
-// Helper to get SDK instance
-const getGroqClient = (apiKey: string) => {
+// Helper to get SDK instance with Key Rotation
+const getGroqClient = (apiKeyString: string) => {
+  let finalKey = apiKeyString;
+  
+  // KEY ROTATION LOGIC
+  if (finalKey.includes(',') || finalKey.includes('\n')) {
+      const keys = finalKey.split(/[\n,]+/).map(k => k.trim()).filter(k => k.length > 0);
+      if (keys.length > 0) {
+          const randomIndex = Math.floor(Math.random() * keys.length);
+          finalKey = keys[randomIndex];
+          // console.log(`[Groq] Rotating Key Pool. Using Key #${randomIndex + 1}`);
+      }
+  }
+
   return new Groq({ 
-    apiKey: apiKey,
+    apiKey: finalKey,
     dangerouslyAllowBrowser: true // Required for client-side use
   });
 };
@@ -96,7 +108,7 @@ export const generateNoteContentGroq = async (
   } catch (error: any) {
     console.error("Groq SDK Error:", error);
     if (error.message?.includes("429")) {
-      throw new Error("Groq Rate Limit Exceeded (429). Please wait or check your plan.");
+      throw new Error("Groq Rate Limit Exceeded (429). Please wait or rotate keys.");
     }
     // Handle error where model doesn't exist (e.g. slight slug mismatch)
     if (error.message?.includes("model")) {
@@ -198,5 +210,52 @@ export const parseSyllabusFromTextGroq = async (
   } catch (e: any) {
     console.error("Groq Syllabus Parsing Error", e);
     throw new Error("Failed to parse syllabus with Groq: " + e.message);
+  }
+};
+
+/* -------------------------------------------------------------------------- */
+/*                        REFINEMENT ENGINE (GROQ)                            */
+/* -------------------------------------------------------------------------- */
+
+export const refineNoteContentGroq = async (
+  config: GenerationConfig,
+  currentContent: string,
+  instruction: string
+): Promise<string> => {
+  const apiKey = config.groqApiKey || process.env.GROQ_API_KEY;
+  if (!apiKey) throw new Error("Groq API Key Missing");
+
+  const groq = getGroqClient(apiKey);
+  const modelName = config.model || 'llama-3.3-70b-versatile';
+
+  try {
+    const prompt = `
+    ROLE: Expert Medical Editor.
+    TASK: Modify the following Medical Note based on the USER INSTRUCTION.
+    
+    USER INSTRUCTION: "${instruction}"
+    
+    RULES:
+    1. Retain the original Markdown formatting (Headers, Mermaid charts, Callouts) unless specifically asked to change them.
+    2. Do NOT output "Here is the revised note". Just output the Markdown.
+    3. Ensure technical accuracy is maintained.
+    
+    ORIGINAL CONTENT:
+    """
+    ${currentContent}
+    """
+    `;
+
+    const completion = await groq.chat.completions.create({
+      messages: [{ role: "user", content: prompt }],
+      model: modelName,
+      temperature: 0.3,
+      stream: false
+    });
+
+    return processGeneratedNote(completion.choices[0]?.message?.content || currentContent);
+  } catch (e: any) {
+    console.error("Groq Refinement Error", e);
+    throw new Error("Failed to refine content: " + e.message);
   }
 };

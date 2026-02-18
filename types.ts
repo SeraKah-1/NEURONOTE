@@ -39,7 +39,7 @@ export enum AppView {
   SETTINGS = 'settings',
   ARCHIVE = 'archive',
   SYLLABUS = 'syllabus',
-  GRAPH = 'graph'
+  KNOWLEDGE = 'knowledge' 
 }
 
 export enum AppTheme {
@@ -52,6 +52,7 @@ export interface UploadedFile {
   name: string;
   mimeType: string;
   data: string; // Base64
+  isTokenized?: boolean; // NEW: Indicates if file is vector-ready
 }
 
 export interface Folder {
@@ -116,6 +117,33 @@ export interface AppState {
   progressStep: string;
   currentView: AppView;
   activeNoteId: string | null;
+}
+
+// --- KNOWLEDGE BASE TYPES ---
+export interface KnowledgeSource {
+  id: string;
+  name: string;
+  type: 'drive' | 'local_folder' | 'pdf_collection';
+  status: 'syncing' | 'ready' | 'error' | 'disconnected';
+  lastSync: number;
+  fileCount: number;
+  sizeBytes: number;
+  icon?: string;
+  config?: {
+    driveFolderId?: string;
+    folderPath?: string;
+  };
+}
+
+export interface KnowledgeFile {
+  id: string;
+  sourceId: string;
+  name: string;
+  type: string;
+  size: number;
+  indexed: boolean; // aka isTokenized
+  contentSnippet?: string; // First 100 chars for preview
+  vectorId?: string; // Future proofing for true RAG
 }
 
 export const MODE_STRUCTURES: Record<NoteMode, string> = {

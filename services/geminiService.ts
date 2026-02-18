@@ -4,12 +4,25 @@ import { GenerationConfig, UploadedFile, SyllabusItem, ChatMessage, NoteMode } f
 import { getStrictPrompt, UNIVERSAL_STRUCTURE_PROMPT } from '../utils/prompts';
 import { processGeneratedNote } from '../utils/formatter';
 
-// Helper to get authenticated AI instance
+// Helper to get authenticated AI instance with Key Rotation
 const getAIClient = (config: GenerationConfig) => {
-  const apiKey = config.apiKey || process.env.API_KEY;
+  let apiKey = config.apiKey || process.env.API_KEY;
   if (!apiKey) {
     throw new Error("API Key is missing. Please unlock with your NeuroKey Card or check Settings.");
   }
+
+  // KEY ROTATION LOGIC
+  // Support comma-separated or newline-separated keys
+  if (apiKey.includes(',') || apiKey.includes('\n')) {
+      const keys = apiKey.split(/[\n,]+/).map(k => k.trim()).filter(k => k.length > 0);
+      if (keys.length > 0) {
+          // Pick a random key for simple load balancing
+          const randomIndex = Math.floor(Math.random() * keys.length);
+          apiKey = keys[randomIndex];
+          // console.log(`[Gemini] Rotating Key Pool (${keys.length} available). Using Key #${randomIndex + 1}`);
+      }
+  }
+
   return new GoogleGenAI({ apiKey });
 };
 
@@ -191,7 +204,7 @@ export const generateNoteContent = async (
   } catch (error: any) {
     console.error("Gemini API Error:", error);
     if (error.message?.includes("429")) {
-      throw new Error("Quota Exceeded (429). Please wait a moment.");
+      throw new Error("Quota Exceeded (429). Please wait a moment or rotate keys.");
     }
     // Handle 404 specifically for clearer UX
     if (error.message?.includes("404")) {
@@ -211,7 +224,7 @@ export const generateDetailedStructure = async (
 ): Promise<string> => {
   const ai = getAIClient(config);
   // Use config.structureModel if available, else standard config.model
-  const modelName = config.structureModel || (config.model.includes('gemini') ? config.model : 'gemini-2.5-flash');
+  const modelName = config.structureModel || (config.model.includes('gemini') ? config.model : 'gemini-3-flash-preview');
 
   try {
     const systemPrompt = config.customStructurePrompt || UNIVERSAL_STRUCTURE_PROMPT;
@@ -247,7 +260,7 @@ export const parseSyllabusToTopics = async (
 ): Promise<SyllabusItem[]> => {
   const ai = getAIClient(config);
   // Use config.model if it seems valid for Gemini
-  const modelName = config.model.includes('gemini') ? config.model : 'gemini-2.5-flash';
+  const modelName = config.model.includes('gemini') ? config.model : 'gemini-3-flash-preview';
 
   try {
     const response = await ai.models.generateContent({
@@ -290,7 +303,7 @@ export const parseSyllabusFromText = async (
   rawText: string
 ): Promise<SyllabusItem[]> => {
   const ai = getAIClient(config);
-  const modelName = config.model.includes('gemini') ? config.model : 'gemini-2.5-flash';
+  const modelName = config.model.includes('gemini') ? config.model : 'gemini-3-flash-preview';
 
   try {
     const response = await ai.models.generateContent({
@@ -321,6 +334,51 @@ export const parseSyllabusFromText = async (
 };
 
 /* -------------------------------------------------------------------------- */
+/*                       MAGIC REFINE (EDIT) ENGINE                           */
+/* -------------------------------------------------------------------------- */
+
+export const refineNoteContent = async (
+  config: GenerationConfig,
+  currentContent: string,
+  instruction: string
+): Promise<string> => {
+  const ai = getAIClient(config);
+  // Use currently selected model
+  const modelName = config.model.includes('gemini') ? config.model : 'gemini-3-flash-preview';
+
+  const prompt = `
+  ROLE: Expert Medical Editor.
+  TASK: Modify the following Medical Note based on the USER INSTRUCTION.
+
+  USER INSTRUCTION: "${instruction}"
+
+  RULES:
+  1. Retain the original Markdown formatting (Headers, Mermaid charts, Callouts) unless specifically asked to change them.
+  2. Do NOT output "Here is the revised note". Just output the Markdown.
+  3. Ensure technical accuracy is maintained.
+
+  ORIGINAL CONTENT:
+  """
+  ${currentContent}
+  """
+  `;
+
+  try {
+      const response = await ai.models.generateContent({
+          model: modelName,
+          contents: { parts: [{ text: prompt }] },
+          config: { temperature: 0.3 }
+      });
+
+      const text = response.text || currentContent;
+      return processGeneratedNote(text);
+  } catch (e: any) {
+      console.error("Gemini Refinement Error", e);
+      throw new Error("Failed to refine content: " + e.message);
+  }
+};
+
+/* -------------------------------------------------------------------------- */
 /*                       NEURO-SIDEKICK CHAT ENGINE                           */
 /* -------------------------------------------------------------------------- */
 
@@ -332,7 +390,7 @@ export const generateChatResponse = async (
 ): Promise<string> => {
   const ai = getAIClient(config);
   // Chat works best with Pro models usually, but Flash is faster for interaction
-  const modelName = config.model.includes('gemini') ? config.model : 'gemini-2.5-flash';
+  const modelName = config.model.includes('gemini') ? config.model : 'gemini-3-flash-preview';
 
   const systemContext = `
   SYSTEM: You are "Neuro-Sidekick", an intelligent medical tutor assistant.
@@ -340,40 +398,37 @@ export const generateChatResponse = async (
   GOAL: Help the user understand deeply.
   
   MODES:
-  1. If user asks "Explain", simplify the concept (ELI5).
-  2. If user asks "Quiz me", ask a Socratic question based on the note.
-  3. If user asks "Clinical", provide a case study relevant to the note.
+  1. If user asks "Explain", simplify the concept using an analogy.
+  2. If user asks "Quiz me", generate a single multiple-choice question about the note.
+  3. If user asks "Summarize", provide a TL;DR.
   
-  CURRENT NOTE CONTENT:
+  NOTE CONTENT:
   """
-  ${currentNoteContent.substring(0, 30000)} ... (truncated if too long)
+  ${currentNoteContent.substring(0, 10000)} ... (truncated if too long)
   """
-  
-  CONSTRAINT: Keep answers concise (under 150 words) unless asked for detail.
   `;
 
   try {
-    // Construct chat history for Gemini
-    // @google/genai format: { role: 'user' | 'model', parts: [{ text: string }] }
-    const historyParts = history.map(msg => ({
-      role: msg.role === 'user' ? 'user' : 'model',
-      parts: [{ text: msg.content }]
-    }));
+      // We assume simple single-turn or limited history for now to save tokens context
+      // Construct chat history for the API
+      const historyContents = history.map(h => ({
+          role: h.role,
+          parts: [{ text: h.content }]
+      }));
 
-    const chat = ai.chats.create({
-      model: modelName,
-      config: {
-        systemInstruction: systemContext,
-        temperature: 0.7,
-      },
-      history: historyParts
-    });
+      const chat = ai.chats.create({
+          model: modelName,
+          config: {
+              systemInstruction: systemContext,
+              temperature: 0.5,
+          },
+          history: historyContents
+      });
 
-    const result = await chat.sendMessage({ message: userMessage });
-    return result.text || "I didn't catch that.";
-
+      const result = await chat.sendMessage({ message: userMessage });
+      return result.text || "I couldn't generate a response.";
   } catch (e: any) {
-    console.error("Chat Generation Error", e);
-    return "Neural Link Unstable. Please retry.";
+      console.error("Chat Error", e);
+      return "Error generating chat response: " + e.message;
   }
 };

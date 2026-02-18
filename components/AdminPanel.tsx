@@ -65,11 +65,12 @@ const AdminPanel: React.FC<AdminPanelProps> = ({ onClose, defaultMode = 'create'
 
   const handleAutoFill = () => {
     // Attempt to pull from browser storage if available (simulating "Current Config")
-    // Note: In a real app, you might pass these as props if called from App.tsx
-    const localGemini = localStorage.getItem('neuro_gemini_key') || ''; // Example key names
+    const localGemini = localStorage.getItem('neuro_gemini_key') || ''; 
     if(localGemini) { setGeminiKey(localGemini); setUseGemini(true); }
     
-    // For Supabase specifically as requested
+    const localGroq = localStorage.getItem('neuro_groq_key') || ''; 
+    if(localGroq) { setGroqKey(localGroq); setUseGroq(true); }
+
     const localSbUrl = localStorage.getItem('neuro_sb_url');
     const localSbKey = localStorage.getItem('neuro_sb_key');
     
@@ -77,11 +78,9 @@ const AdminPanel: React.FC<AdminPanelProps> = ({ onClose, defaultMode = 'create'
         setSbUrl(localSbUrl);
         setSbKey(localSbKey);
         setUseSupabase(true);
-        setSuccessMsg("Autofilled from local cache.");
-    } else {
-        setError("No local configuration found to autofill.");
     }
     
+    setSuccessMsg("Autofilled from local cache.");
     setTimeout(() => { setError(null); setSuccessMsg(null); }, 3000);
   };
 
@@ -153,9 +152,11 @@ const AdminPanel: React.FC<AdminPanelProps> = ({ onClose, defaultMode = 'create'
           return;
       }
 
+      // Allow multiline keys -> convert to single line for internal storage if needed, or keep formatting.
+      // We will store as-is, services will handle parsing (newlines/commas).
       const payload: EncryptedPayload = {
-          geminiKey: useGemini ? geminiKey : undefined,
-          groqKey: useGroq ? groqKey : undefined,
+          geminiKey: useGemini ? geminiKey.trim() : undefined,
+          groqKey: useGroq ? groqKey.trim() : undefined,
           supabaseUrl: useSupabase ? sbUrl : undefined,
           supabaseKey: useSupabase ? sbKey : undefined
       };
@@ -335,7 +336,7 @@ const AdminPanel: React.FC<AdminPanelProps> = ({ onClose, defaultMode = 'create'
                     <div className="space-y-4">
                         <div className="flex justify-between items-end">
                             <div className="flex items-center gap-2 text-neuro-primary font-bold text-xs uppercase tracking-wider">
-                                <Cpu size={14}/> API Payloads
+                                <Cpu size={14}/> API Payloads (Load Balancing Enabled)
                             </div>
                             <button onClick={handleAutoFill} className="text-[10px] flex items-center gap-1 text-gray-500 hover:text-neuro-primary transition-colors">
                                 <RefreshCw size={10}/> Auto-Fill Local
@@ -347,12 +348,17 @@ const AdminPanel: React.FC<AdminPanelProps> = ({ onClose, defaultMode = 'create'
                             <div className="flex items-center justify-between mb-3">
                                 <div className="flex items-center gap-3">
                                     <div className={`p-2 rounded-lg ${useGemini ? 'bg-indigo-500 text-white' : 'bg-gray-800 text-gray-500'}`}><Sparkles size={16}/></div>
-                                    <span className="font-bold text-sm">Google Gemini</span>
+                                    <span className="font-bold text-sm">Google Gemini Key Pool</span>
                                 </div>
                                 <input type="checkbox" checked={useGemini} onChange={e => setUseGemini(e.target.checked)} className="accent-indigo-500 w-4 h-4"/>
                             </div>
                             {useGemini && (
-                                <input type="password" value={geminiKey} onChange={e => setGeminiKey(e.target.value)} className="w-full bg-black/40 border border-indigo-500/30 rounded-lg p-2.5 text-xs text-indigo-100 font-mono outline-none focus:border-indigo-500 animate-fade-in" placeholder="AIzaSy..." />
+                                <textarea 
+                                    value={geminiKey} 
+                                    onChange={e => setGeminiKey(e.target.value)} 
+                                    className="w-full h-24 bg-black/40 border border-indigo-500/30 rounded-lg p-2.5 text-xs text-indigo-100 font-mono outline-none focus:border-indigo-500 animate-fade-in resize-none" 
+                                    placeholder="Enter multiple API Keys (one per line OR comma-separated) to enable rotation and failover." 
+                                />
                             )}
                         </div>
 
@@ -361,12 +367,17 @@ const AdminPanel: React.FC<AdminPanelProps> = ({ onClose, defaultMode = 'create'
                             <div className="flex items-center justify-between mb-3">
                                 <div className="flex items-center gap-3">
                                     <div className={`p-2 rounded-lg ${useGroq ? 'bg-orange-600 text-white' : 'bg-gray-800 text-gray-500'}`}><Cpu size={16}/></div>
-                                    <span className="font-bold text-sm">Groq Cloud</span>
+                                    <span className="font-bold text-sm">Groq Cloud Key Pool</span>
                                 </div>
                                 <input type="checkbox" checked={useGroq} onChange={e => setUseGroq(e.target.checked)} className="accent-orange-500 w-4 h-4"/>
                             </div>
                             {useGroq && (
-                                <input type="password" value={groqKey} onChange={e => setGroqKey(e.target.value)} className="w-full bg-black/40 border border-orange-500/30 rounded-lg p-2.5 text-xs text-orange-100 font-mono outline-none focus:border-orange-500 animate-fade-in" placeholder="gsk_..." />
+                                <textarea 
+                                    value={groqKey} 
+                                    onChange={e => setGroqKey(e.target.value)} 
+                                    className="w-full h-24 bg-black/40 border border-orange-500/30 rounded-lg p-2.5 text-xs text-orange-100 font-mono outline-none focus:border-orange-500 animate-fade-in resize-none" 
+                                    placeholder="Enter multiple API Keys (one per line OR comma-separated) to enable rotation and failover." 
+                                />
                             )}
                         </div>
 

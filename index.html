@@ -7,6 +7,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>NeuroNote AI</title>
     <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/html2pdf.js/0.10.1/html2pdf.bundle.min.js"></script>
     <script>
       tailwind.config = {
         darkMode: 'class',
@@ -49,6 +50,7 @@
       }
     </script>
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800;900&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/katex.min.css" integrity="sha384-n8MVd4RsNIU0tAv4ct0nTaAbDJwPJzDEaqSD1odI+WdtXRGWt2kTvGFasHpSy3SV" crossorigin="anonymous">
     <style>
       body {
         background-color: #f8fafc;
@@ -212,14 +214,11 @@
       .markdown-body pre code { background-color: transparent; color: inherit; padding: 0; }
       .markdown-body img { display: block; margin: 20px auto; border-radius: 6px; border: 1px solid var(--md-border); max-width: 100%; }
 
-      /* 
-         ========================================================================
-         NUCLEAR OPTION FOR MERMAID VISIBILITY (FIXED)
-         Forces high contrast (Black on White) regardless of parent theme.
-         ========================================================================
-      */
-      
-      /* MATCHING CLASS NAME WITH REACT COMPONENT */
+      /* KATEX / MATH ADJUSTMENTS */
+      .katex { font-size: 1.1em; }
+      .katex-display { margin: 20px 0; overflow-x: auto; overflow-y: hidden; padding: 10px 0; }
+
+      /* MERMAID */
       .mermaid-container {
         background-color: #ffffff !important;
         border: 1px solid #e2e8f0;
@@ -230,66 +229,11 @@
         display: block;
         box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.05);
       }
-
-      /* 1. CONTAINER & SCALING */
-      .mermaid-container svg { 
-        font-family: 'Inter', sans-serif !important; 
-        max-width: none !important; 
-        min-width: 100% !important;
-        height: auto !important; 
-        background-color: transparent !important;
-      }
-
-      /* 2. TEXT - Force Black */
-      .mermaid-container .nodeLabel, 
-      .mermaid-container .edgeLabel, 
-      .mermaid-container .label, 
-      .mermaid-container text, 
-      .mermaid-container tspan, 
-      .mermaid-container div,
-      .mermaid-container span,
-      .mermaid-container p,
-      .mermaid-container g.mindmap-node text,
-      .mermaid-container .node foreignObject div { 
-        color: #000000 !important; 
-        fill: #000000 !important;
-        font-family: 'Inter', sans-serif !important; 
-        font-size: 14px !important;
-        line-height: 1.5 !important;
-      }
-
-      /* 3. SHAPES - White Fill, Black Stroke */
-      .mermaid-container .node rect, 
-      .mermaid-container .node circle, 
-      .mermaid-container .node polygon, 
-      .mermaid-container .node path, 
-      .mermaid-container .node ellipse,
-      .mermaid-container g.mindmap-node rect,
-      .mermaid-container g.mindmap-node path,
-      .mermaid-container rect.actor { 
-        fill: #ffffff !important; 
-        stroke: #000000 !important; 
-        stroke-width: 2px !important; 
-      }
-
-      /* 4. LINES - Black */
-      .mermaid-container .edgePath .path, 
-      .mermaid-container .flowchart-link, 
-      .mermaid-container .link,
-      .mermaid-container .actor-line,
-      .mermaid-container .messageLine0,
-      .mermaid-container .messageLine1 { 
-        stroke: #000000 !important; 
-        stroke-width: 2px !important; 
-        fill: none !important;
-      }
-      
-      /* 5. ARROWHEADS - Black */
-      .mermaid-container .marker, 
-      .mermaid-container #arrowhead path { 
-        fill: #000000 !important; 
-        stroke: #000000 !important; 
-      }
+      .mermaid-container svg { font-family: 'Inter', sans-serif !important; max-width: none !important; min-width: 100% !important; height: auto !important; background-color: transparent !important; }
+      .mermaid-container .nodeLabel, .mermaid-container .edgeLabel, .mermaid-container .label { color: #000000 !important; fill: #000000 !important; }
+      .mermaid-container .node rect, .mermaid-container .node circle { fill: #ffffff !important; stroke: #000000 !important; stroke-width: 2px !important; }
+      .mermaid-container .edgePath .path { stroke: #000000 !important; stroke-width: 2px !important; fill: none !important; }
+      .mermaid-container .marker { fill: #000000 !important; stroke: #000000 !important; }
 
       .sensor-blur { filter: blur(5px); opacity: 0.7; background: var(--md-code-bg); cursor: pointer; transition: all 0.2s ease; border-radius: 4px; }
       .sensor-blur:hover { opacity: 0.9; background: var(--md-border); }
@@ -308,6 +252,8 @@
     "lucide-react": "https://esm.sh/lucide-react@^0.563.0",
     "mermaid": "https://esm.sh/mermaid@^11.12.2",
     "remark-gfm": "https://esm.sh/remark-gfm@^4.0.1",
+    "remark-math": "https://esm.sh/remark-math@6.0.0",
+    "rehype-katex": "https://esm.sh/rehype-katex@7.0.0",
     "groq-sdk": "https://esm.sh/groq-sdk@0.7.0"
   }
 }

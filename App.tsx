@@ -1,6 +1,6 @@
 
 import React, { useState, useEffect, Suspense } from 'react';
-import { BrainCircuit, Settings2, Sparkles, BookOpen, Layers, Zap, AlertCircle, X, Key, GraduationCap, Microscope, Puzzle, Database, HardDrive, Cloud, Layout, Activity, FlaskConical, ListChecks, Bell, HelpCircle, Copy, Check, ShieldCheck, Cpu, Unlock, Download, RefreshCw, User, Lock, Server, PenTool, Wand2, ChevronRight, FileText, FolderOpen, Trash2, CheckCircle2, Circle, Command, Bot, Maximize2, Home, Projector, Minimize2, Component, Save, BookTemplate, ChevronDown, ChevronUp, MessageSquarePlus, Library, Palette, Sun, Moon, Coffee, Network } from 'lucide-react';
+import { BrainCircuit, Settings2, Sparkles, BookOpen, Layers, Zap, AlertCircle, X, Key, GraduationCap, Microscope, Puzzle, Database, HardDrive, Cloud, Layout, Activity, FlaskConical, ListChecks, Bell, HelpCircle, Copy, Check, ShieldCheck, Cpu, Unlock, Download, RefreshCw, User, Lock, Server, PenTool, Wand2, ChevronRight, FileText, FolderOpen, Trash2, CheckCircle2, Circle, Command, Bot, Maximize2, Home, Projector, Minimize2, Component, Save, BookTemplate, ChevronDown, ChevronUp, MessageSquarePlus, Library, Palette, Sun, Moon, Coffee, Network, LogOut } from 'lucide-react';
 import { AppModel, AppState, NoteData, GenerationConfig, MODE_STRUCTURES, NoteMode, HistoryItem, AIProvider, StorageType, AppView, EncryptedPayload, SavedPrompt, AppTheme } from './types';
 import { generateNoteContent, generateDetailedStructure } from './services/geminiService';
 import { generateNoteContentGroq, getAvailableGroqModels, generateDetailedStructureGroq } from './services/groqService';
@@ -18,12 +18,16 @@ import ErrorBoundary from './components/ErrorBoundary';
 // LAZY LOAD OPTIMIZATION:
 const OutputDisplay = React.lazy(() => import('./components/OutputDisplay'));
 const AdminPanel = React.lazy(() => import('./components/AdminPanel'));
-const GraphView = React.lazy(() => import('./components/GraphView'));
+// GraphView removed for performance and minimalism
+const KnowledgeBase = React.lazy(() => import('./components/KnowledgeBase'));
 
 const SUPABASE_SETUP_SQL = `
 -- RUN THIS IN SUPABASE SQL EDITOR --
 
--- 1. Create Table (with tags support)
+-- 1. Enable Vector Extension (pgvector)
+create extension if not exists vector;
+
+-- 2. Create Notes Table
 create table if not exists public.neuro_notes (
   id text primary key,
   timestamp bigint,
@@ -31,15 +35,49 @@ create table if not exists public.neuro_notes (
   mode text,
   content text,
   provider text,
-  tags text[] -- Array of strings for tagging
+  tags text[]
 );
 
--- 2. Security (Allow All)
-alter table public.neuro_notes enable row level security;
-drop policy if exists "God Mode" on public.neuro_notes;
-create policy "God Mode" on public.neuro_notes for all using (true) with check (true);
+-- 3. Create Vector Store (The Brain)
+create table if not exists public.document_embeddings (
+  id bigserial primary key,
+  content text,
+  metadata jsonb,
+  embedding vector(1536) -- Compatible with OpenAI/Gemini/Groq embeddings
+);
 
--- 3. Enable Realtime
+-- 4. Search Function
+create or replace function match_documents (
+  query_embedding vector(1536),
+  match_threshold float,
+  match_count int
+)
+returns table (
+  id bigint,
+  content text,
+  metadata jsonb,
+  similarity float
+)
+language sql stable
+as $$
+  select
+    id,
+    content,
+    metadata,
+    1 - (embedding <=> query_embedding) as similarity
+  from document_embeddings
+  where 1 - (embedding <=> query_embedding) > match_threshold
+  order by similarity desc
+  limit match_count;
+$$;
+
+-- 5. Security (Allow All for Demo)
+alter table public.neuro_notes enable row level security;
+alter table public.document_embeddings enable row level security;
+create policy "God Mode Notes" on public.neuro_notes for all using (true) with check (true);
+create policy "God Mode Vectors" on public.document_embeddings for all using (true) with check (true);
+
+-- 6. Enable Realtime
 alter publication supabase_realtime add table public.neuro_notes;
 `.trim();
 
@@ -103,6 +141,45 @@ const AppContent: React.FC = () => {
   const [showAdminModal, setShowAdminModal] = useState(false);
   const [savedTemplates, setSavedTemplates] = useState<SavedPrompt[]>([]);
 
+  // --- SESSION PERSISTENCE (AUTO LOGIN) ---
+  useEffect(() => {
+      // 1. Check LocalStorage for Session Keys
+      // This allows users to skip the "Card" step if they've logged in recently on this device
+      const localGeminiKey = localStorage.getItem('neuro_gemini_key');
+      const localGroqKey = localStorage.getItem('neuro_groq_key');
+      const localSbUrl = localStorage.getItem('neuro_sb_url');
+      const localSbKey = localStorage.getItem('neuro_sb_key');
+      
+      if (localGeminiKey || localGroqKey) {
+          setConfig(prev => ({
+              ...prev,
+              apiKey: localGeminiKey || prev.apiKey,
+              groqApiKey: localGroqKey || prev.groqApiKey,
+              supabaseUrl: localSbUrl || prev.supabaseUrl,
+              supabaseKey: localSbKey || prev.supabaseKey,
+              provider: localGeminiKey ? AIProvider.GEMINI : AIProvider.GROQ
+          }));
+          setIsAuthenticated(true); // Auto-login bypass
+          console.log("⚡ Auto-login via Persistent Session");
+      }
+
+      // 2. Load other settings
+      if (localSbUrl && localSbKey) { storageService.initSupabase(localSbUrl, localSbKey); }
+      setSavedTemplates(storageService.getTemplates());
+      const savedTheme = localStorage.getItem('neuro_theme');
+      if (savedTheme) { setCurrentTheme(savedTheme as AppTheme); }
+  }, []);
+
+  const handleLogout = () => {
+      if(confirm("End Session? This will require the NeuroKey Card to unlock again.")) {
+          localStorage.removeItem('neuro_gemini_key');
+          localStorage.removeItem('neuro_groq_key');
+          localStorage.removeItem('neuro_sb_url');
+          localStorage.removeItem('neuro_sb_key');
+          window.location.reload();
+      }
+  };
+
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
       if ((e.metaKey || e.ctrlKey) && e.key === 'k') { e.preventDefault(); setShowPalette(prev => !prev); }
@@ -114,17 +191,17 @@ const AppContent: React.FC = () => {
 
   const handleAuthUnlock = (payload: EncryptedPayload) => {
     setConfig(prev => ({ ...prev, apiKey: payload.geminiKey || prev.apiKey, groqApiKey: payload.groqKey || prev.groqApiKey, supabaseUrl: payload.supabaseUrl || prev.supabaseUrl, supabaseKey: payload.supabaseKey || prev.supabaseKey, storageType: (payload.supabaseUrl && payload.supabaseKey) ? StorageType.SUPABASE : StorageType.LOCAL }));
+    
+    // PERSIST KEYS TO SESSION
+    if (payload.geminiKey) localStorage.setItem('neuro_gemini_key', payload.geminiKey);
+    if (payload.groqKey) localStorage.setItem('neuro_groq_key', payload.groqKey);
+    if (payload.supabaseUrl) localStorage.setItem('neuro_sb_url', payload.supabaseUrl);
+    if (payload.supabaseKey) localStorage.setItem('neuro_sb_key', payload.supabaseKey);
+
     if (payload.supabaseUrl && payload.supabaseKey) { storageService.initSupabase(payload.supabaseUrl, payload.supabaseKey); }
     setIsAuthenticated(true);
     notificationService.requestPermissionManual();
   };
-
-  useEffect(() => {
-    if (config.supabaseUrl && config.supabaseKey) { storageService.initSupabase(config.supabaseUrl, config.supabaseKey); }
-    setSavedTemplates(storageService.getTemplates());
-    const savedTheme = localStorage.getItem('neuro_theme');
-    if (savedTheme) { setCurrentTheme(savedTheme as AppTheme); }
-  }, [config.supabaseUrl, config.supabaseKey, storageService]);
 
   const handleThemeChange = (theme: AppTheme) => { setCurrentTheme(theme); localStorage.setItem('neuro_theme', theme); };
 
@@ -170,7 +247,26 @@ const AppContent: React.FC = () => {
   };
 
   const handleUpdateContent = (newContent: string) => { setAppState(prev => ({ ...prev, generatedContent: newContent })); };
-  const handleSaveApiKey = (rawValue: string, type: 'gemini' | 'groq' | 'sb_url' | 'sb_key') => { const key = rawValue.trim(); if (type === 'gemini') setConfig(prev => ({ ...prev, apiKey: key })); else if (type === 'groq') setConfig(prev => ({ ...prev, groqApiKey: key })); else if (type === 'sb_url') setConfig(prev => ({ ...prev, supabaseUrl: key })); else if (type === 'sb_key') setConfig(prev => ({ ...prev, supabaseKey: key })); };
+  
+  // Updated Key Saver with Persistence Logic
+  const handleSaveApiKey = (rawValue: string, type: 'gemini' | 'groq' | 'sb_url' | 'sb_key') => { 
+      const key = rawValue.trim(); 
+      if (type === 'gemini') {
+          setConfig(prev => ({ ...prev, apiKey: key })); 
+          localStorage.setItem('neuro_gemini_key', key);
+      } else if (type === 'groq') {
+          setConfig(prev => ({ ...prev, groqApiKey: key })); 
+          localStorage.setItem('neuro_groq_key', key);
+      } else if (type === 'sb_url') {
+          setConfig(prev => ({ ...prev, supabaseUrl: key }));
+          localStorage.setItem('neuro_sb_url', key);
+      }
+      else if (type === 'sb_key') {
+          setConfig(prev => ({ ...prev, supabaseKey: key }));
+          localStorage.setItem('neuro_sb_key', key);
+      }
+  };
+  
   const handleProviderSwitch = (provider: AIProvider) => { setConfig(prev => ({ ...prev, provider })); if (provider === AIProvider.GEMINI) { setConfig(prev => ({ ...prev, model: AppModel.GEMINI_3_FLASH })); } else { setConfig(prev => ({ ...prev, model: AppModel.GROQ_LLAMA_3_3_70B })); } };
 
   const handleGenerate = async () => {
@@ -223,11 +319,11 @@ const AppContent: React.FC = () => {
       />
 
       {/* --- SIDEBAR --- */}
-      <aside className={`w-full md:w-[280px] lg:w-[320px] p-5 flex flex-col shrink-0 z-30 h-screen overflow-hidden shadow-2xl border-r border-[var(--ui-border)] bg-[var(--ui-sidebar)] transition-all duration-300 ${focusMode ? 'hidden md:hidden' : 'block'}`}>
+      <aside className={`w-full md:w-[280px] lg:w-[320px] p-5 flex flex-col shrink-0 z-30 h-screen overflow-hidden shadow-sm border-r border-[var(--ui-border)] bg-[var(--ui-sidebar)] transition-all duration-300 ${focusMode ? 'hidden md:hidden' : 'block'}`}>
         
         {/* Header Logo */}
-        <div className="flex items-center space-x-3 mb-8 shrink-0 select-none cursor-pointer group px-2" onClick={() => setView(AppView.WORKSPACE)}>
-          <div className="w-10 h-10 bg-gradient-to-br from-[var(--ui-primary)] to-indigo-700 rounded-xl flex items-center justify-center shadow-lg group-hover:scale-105 transition-transform">
+        <div className="flex items-center space-x-3 mb-6 shrink-0 select-none cursor-pointer group px-2" onClick={() => setView(AppView.WORKSPACE)}>
+          <div className="w-10 h-10 bg-[var(--ui-primary)] rounded-xl flex items-center justify-center shadow-lg group-hover:scale-105 transition-transform">
              <BrainCircuit className="text-white" size={22} />
           </div>
           <div className="flex flex-col">
@@ -264,6 +360,11 @@ const AppContent: React.FC = () => {
                          <input type="password" value={p === 'Gemini' ? config.apiKey : config.groqApiKey} onChange={(e) => handleSaveApiKey(e.target.value, p.toLowerCase() as any)} className="w-full bg-[var(--ui-bg)] border border-[var(--ui-border)] text-[var(--ui-text-main)] rounded-lg p-3 text-xs font-mono outline-none focus:border-[var(--ui-primary)]" />
                        </div>
                    ))}
+                   
+                   {/* Logout / Clear Session */}
+                   <button onClick={handleLogout} className="w-full flex items-center justify-center gap-2 mt-4 py-2 border border-red-500/30 text-red-500 hover:bg-red-500/10 rounded-lg text-xs font-bold transition-all">
+                       <LogOut size={12}/> Clear Session & Lock
+                   </button>
                  </div>
                )}
 
@@ -312,20 +413,18 @@ const AppContent: React.FC = () => {
                 <FileSystem onSelectNote={handleSelectNoteFromFileSystem} activeNoteId={appState.activeNoteId} />
              </div>
 
-             <div className="border-t border-[var(--ui-border)] pt-4 space-y-4 shrink-0">
-               <div className="space-y-2">
-                  {[
-                      { v: AppView.WORKSPACE, label: 'Main Menu', icon: Home },
-                      { v: AppView.ARCHIVE, label: 'Neural Vault', icon: Cloud },
-                      { v: AppView.GRAPH, label: 'Neural Lattice', icon: Network } // Updated Label
-                  ].map(btn => (
-                      <button key={btn.label} onClick={() => setView(btn.v)} className={`w-full flex items-center gap-3 p-2 rounded-lg hover:bg-[var(--ui-bg)] text-[var(--ui-text-muted)] hover:text-[var(--ui-text-main)] transition-colors ${appState.currentView === btn.v ? 'bg-[var(--ui-bg)] font-bold text-[var(--ui-text-main)] border border-[var(--ui-border)]' : ''}`}>
-                          <btn.icon size={16} className={appState.currentView === btn.v ? 'text-[var(--ui-primary)]' : ''}/> <span className="text-xs">{btn.label}</span>
-                      </button>
-                  ))}
-               </div>
+             <div className="border-t border-[var(--ui-border)] pt-4 space-y-2 shrink-0">
+               {[
+                   { v: AppView.WORKSPACE, label: 'Main Menu', icon: Home },
+                   { v: AppView.KNOWLEDGE, label: 'Knowledge Base', icon: Database }, 
+                   { v: AppView.ARCHIVE, label: 'Neural Vault', icon: Cloud },
+               ].map(btn => (
+                   <button key={btn.label} onClick={() => setView(btn.v)} className={`w-full flex items-center gap-3 p-2.5 rounded-lg hover:bg-[var(--ui-bg)] text-[var(--ui-text-muted)] hover:text-[var(--ui-text-main)] transition-colors ${appState.currentView === btn.v ? 'bg-[var(--ui-bg)] font-bold text-[var(--ui-text-main)] border border-[var(--ui-border)]' : ''}`}>
+                       <btn.icon size={16} className={appState.currentView === btn.v ? 'text-[var(--ui-primary)]' : ''}/> <span className="text-xs">{btn.label}</span>
+                   </button>
+               ))}
 
-               <div className="grid grid-cols-2 gap-2">
+               <div className="grid grid-cols-2 gap-2 mt-2">
                  <button onClick={() => setView(AppView.SETTINGS)} className="flex flex-col items-center justify-center space-y-1 p-2 rounded-lg hover:bg-[var(--ui-bg)] text-[var(--ui-text-muted)] hover:text-[var(--ui-text-main)] border border-transparent hover:border-[var(--ui-border)]">
                     <Settings2 size={16} /> <span className="text-[9px] font-bold">CONFIG</span>
                  </button>
@@ -345,12 +444,6 @@ const AppContent: React.FC = () => {
       {/* --- MAIN CONTENT AREA --- */}
       <main className="flex-1 relative h-screen overflow-hidden flex flex-col bg-[var(--ui-bg)]">
         
-        {/* Background Gradients (Subtle in Light Mode) */}
-        <div className="absolute top-0 left-0 w-full h-full overflow-hidden pointer-events-none z-0 opacity-20">
-          <div className="absolute top-[-20%] left-[10%] w-[600px] h-[600px] bg-[var(--ui-primary)] opacity-10 rounded-full blur-[120px]"></div>
-          <div className="absolute bottom-[-10%] right-[5%] w-[500px] h-[500px] bg-[var(--md-accent)] opacity-10 rounded-full blur-[100px]"></div>
-        </div>
-        
         {focusMode && (
            <button onClick={() => setFocusMode(false)} className="absolute top-4 right-4 z-50 p-3 bg-[var(--ui-sidebar)] hover:bg-[var(--ui-border)] text-[var(--ui-text-main)] rounded-full border border-[var(--ui-border)] shadow-xl backdrop-blur-md transition-all hover:scale-110 group">
              <Minimize2 size={20} className="group-hover:text-[var(--ui-primary)] transition-colors"/>
@@ -365,12 +458,12 @@ const AppContent: React.FC = () => {
                   <h2 className="text-2xl md:text-3xl font-bold text-[var(--ui-text-main)] tracking-tight flex items-center gap-3">
                      {appState.currentView === AppView.SYLLABUS ? <ListChecks className="text-[var(--ui-primary)]"/> : 
                       appState.currentView === AppView.ARCHIVE ? <Cloud className="text-[var(--ui-primary)]"/> : 
-                      appState.currentView === AppView.GRAPH ? <Network className="text-[var(--ui-primary)]"/> :
+                      appState.currentView === AppView.KNOWLEDGE ? <Database className="text-[var(--ui-primary)]"/> :
                       <Sparkles className="text-[var(--ui-primary)]"/>}
                      
                      {appState.currentView === AppView.SYLLABUS ? 'Syllabus Manager' : 
                       appState.currentView === AppView.ARCHIVE ? 'Neural Vault' : 
-                      appState.currentView === AppView.GRAPH ? 'Neural Lattice' :
+                      appState.currentView === AppView.KNOWLEDGE ? 'Knowledge Base' :
                       'Workspace'}
                   </h2>
                   <p className="text-[var(--ui-text-muted)] text-sm mt-1 font-medium">
@@ -406,15 +499,15 @@ const AppContent: React.FC = () => {
           
           {!appState.isLoading && appState.currentView === AppView.ARCHIVE && <div className="flex-1 animate-slide-up h-full flex flex-col"><NeuralVault onSelectNote={handleSelectNoteFromFileSystem} onImportCloud={handleRetrieveFromCloud} /></div>}
           
-          {/* GRAPH VIEW (Neural Lattice) */}
-          {!appState.isLoading && appState.currentView === AppView.GRAPH && (
-             <div className="flex-1 animate-slide-up h-full flex flex-col overflow-hidden relative border border-[var(--ui-border)] rounded-xl shadow-inner bg-[var(--ui-bg)]">
-                <Suspense fallback={<div className="flex items-center justify-center h-full text-[var(--ui-text-muted)]">Unfolding Neural Lattice...</div>}>
-                   <GraphView onSelectNote={handleSelectNoteFromFileSystem} />
-                </Suspense>
-             </div>
+          {/* KNOWLEDGE BASE VIEW */}
+          {!appState.isLoading && appState.currentView === AppView.KNOWLEDGE && (
+              <div className="flex-1 animate-slide-up h-full flex flex-col border border-[var(--ui-border)] rounded-xl bg-[var(--ui-bg)] overflow-hidden shadow-sm">
+                 <Suspense fallback={<div>Loading KB...</div>}>
+                    <KnowledgeBase />
+                 </Suspense>
+              </div>
           )}
-
+          
           {!appState.isLoading && appState.generatedContent && (
              <div className="flex-1 animate-slide-up h-full">
                <Suspense fallback={<div>Loading Editor...</div>}>
@@ -422,6 +515,7 @@ const AppContent: React.FC = () => {
                     content={appState.generatedContent} 
                     topic={noteData.topic} 
                     noteId={appState.activeNoteId || undefined}
+                    config={config} // PASS CONFIG HERE
                     onUpdateContent={handleUpdateContent}
                     onManualSave={handleManualSave}
                     theme={currentTheme} 
@@ -436,7 +530,7 @@ const AppContent: React.FC = () => {
             <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 h-full pb-6">
                <div className="lg:col-span-5 flex flex-col gap-5 animate-slide-up" style={{animationDelay: '0.1s'}}>
                  {/* Topic */}
-                 <div className="bg-[var(--ui-sidebar)] border border-[var(--ui-border)] p-5 rounded-2xl shadow-xl backdrop-blur-sm">
+                 <div className="bg-[var(--ui-sidebar)] border border-[var(--ui-border)] p-5 rounded-2xl shadow-sm">
                     <label className="text-[10px] font-bold text-[var(--ui-primary)] uppercase tracking-widest mb-3 flex items-center gap-2">
                        <Layers size={14} /> Subject Matter
                     </label>
@@ -451,7 +545,7 @@ const AppContent: React.FC = () => {
                  </div>
 
                  {/* Mode */}
-                 <div className="bg-[var(--ui-sidebar)] border border-[var(--ui-border)] p-5 rounded-2xl shadow-xl backdrop-blur-sm">
+                 <div className="bg-[var(--ui-sidebar)] border border-[var(--ui-border)] p-5 rounded-2xl shadow-sm">
                     <label className="text-[10px] font-bold text-[var(--ui-text-muted)] uppercase tracking-widest mb-3 block">Instruction Mode</label>
                     <div className="grid grid-cols-2 gap-2">
                        {Object.values(NoteMode).map((mode) => (
@@ -464,7 +558,7 @@ const AppContent: React.FC = () => {
                  </div>
 
                  {/* Files */}
-                 <div className="bg-[var(--ui-sidebar)] border border-[var(--ui-border)] p-5 rounded-2xl shadow-xl backdrop-blur-sm flex-1">
+                 <div className="bg-[var(--ui-sidebar)] border border-[var(--ui-border)] p-5 rounded-2xl shadow-sm flex-1">
                     <label className="text-[10px] font-bold text-[var(--ui-primary)] uppercase tracking-widest flex items-center gap-2 mb-4">
                          <FileText size={14} /> Context Data
                     </label>
@@ -474,7 +568,7 @@ const AppContent: React.FC = () => {
 
                <div className="lg:col-span-7 flex flex-col gap-5 animate-slide-up" style={{animationDelay: '0.2s'}}>
                  {/* Neural Engine (RESTORED & THEMED) */}
-                 <div className="bg-[var(--ui-sidebar)] border border-[var(--ui-border)] p-5 rounded-2xl shadow-xl backdrop-blur-sm">
+                 <div className="bg-[var(--ui-sidebar)] border border-[var(--ui-border)] p-5 rounded-2xl shadow-sm">
                     <div className="flex justify-between items-center mb-3">
                        <label className="text-[10px] font-bold text-[var(--ui-primary)] uppercase tracking-widest flex items-center gap-2">
                          <Bot size={14} /> Neural Engine
@@ -543,7 +637,7 @@ const AppContent: React.FC = () => {
                  </div>
 
                  {/* Blueprint */}
-                 <div className="bg-[var(--ui-sidebar)] border border-[var(--ui-border)] p-5 rounded-2xl shadow-xl backdrop-blur-sm flex-1 flex flex-col min-h-[300px] relative">
+                 <div className="bg-[var(--ui-sidebar)] border border-[var(--ui-border)] p-5 rounded-2xl shadow-sm flex-1 flex flex-col min-h-[300px] relative">
                     <div className="flex items-center justify-between mb-4">
                        <label className="text-[10px] font-bold text-[var(--ui-primary)] uppercase tracking-widest flex items-center gap-2">
                          <BookOpen size={14} /> Structural Blueprint
@@ -589,7 +683,7 @@ const AppContent: React.FC = () => {
           )}
         </div>
         
-        {!focusMode && <div className="absolute bottom-3 right-5 z-50 text-[10px] text-[var(--ui-text-muted)] font-mono pointer-events-none select-none">NEURONOTE.AI // SYSTEM ACTIVE</div>}
+        {!focusMode && <div className="absolute bottom-3 right-5 z-50 text-[10px] text-[var(--ui-text-muted)] font-mono pointer-events-none select-none">NEURONOTE.AI // V4.0</div>}
       </main>
 
       {showAdminModal && <div className="fixed inset-0 z-[100] bg-black/90 backdrop-blur-xl flex items-center justify-center p-4 animate-fade-in"><div className="bg-[var(--ui-sidebar)] border border-[var(--ui-border)] rounded-2xl shadow-2xl w-full max-w-2xl overflow-hidden flex flex-col h-[85vh]"><Suspense fallback={<div>Loading Forge...</div>}><AdminPanel onClose={() => setShowAdminModal(false)} defaultMode="create" /></Suspense></div></div>}

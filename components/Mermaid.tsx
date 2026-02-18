@@ -3,7 +3,7 @@ import React, { useEffect, useRef, useState, useCallback, useMemo } from 'react'
 import { 
   ZoomIn, ZoomOut, RotateCcw, Download, 
   AlertTriangle, Maximize, Move, Image as ImageIcon,
-  Edit2, Play, X, Copy, Check, Wand2
+  Edit2, Play, X, Copy, Check, Wand2, Minimize2
 } from 'lucide-react';
 
 interface MermaidProps {
@@ -42,6 +42,7 @@ const Mermaid: React.FC<MermaidProps> = ({ chart }) => {
   const [internalChart, setInternalChart] = useState(chart); // Chart yang aktif dirender
   const [draftCode, setDraftCode] = useState(chart); // Chart yang sedang diedit di textarea
   const [isEditing, setIsEditing] = useState(false); // Mode edit toggle
+  const [isFullscreen, setIsFullscreen] = useState(false); // Mode Fullscreen
   
   const [svgContent, setSvgContent] = useState<string>('');
   const [status, setStatus] = useState<'loading' | 'success' | 'error'>('loading');
@@ -316,14 +317,21 @@ const Mermaid: React.FC<MermaidProps> = ({ chart }) => {
   }
 
   return (
-    <div className={`relative group my-6 border border-gray-200 rounded-xl bg-white overflow-hidden shadow-sm transition-shadow hover:shadow-md ${isEditing ? 'h-[500px]' : 'h-[400px] md:h-[500px]'} flex flex-col`}>
+    <div className={`
+        relative group my-6 border border-gray-200 rounded-xl bg-white overflow-hidden shadow-sm transition-all
+        ${isFullscreen ? 'fixed inset-0 z-50 h-screen m-0 rounded-none' : isEditing ? 'h-[500px]' : 'h-[400px] md:h-[500px]'}
+        flex flex-col
+    `}>
       
       {/* TOOLBAR (Floating) */}
       {!isEditing && (
         <div className="absolute top-3 right-3 z-10 flex flex-col gap-1 opacity-0 group-hover:opacity-100 transition-opacity duration-200 pointer-events-none">
            <div className="bg-white/90 backdrop-blur border border-gray-200 rounded-lg shadow-lg p-1 flex flex-col gap-1 pointer-events-auto">
-              <button onClick={() => setIsEditing(true)} className="p-1.5 hover:bg-blue-50 text-gray-600 hover:text-blue-600 rounded transition-colors" title="Edit Diagram"><Edit2 size={16}/></button>
+              <button onClick={() => setIsFullscreen(!isFullscreen)} className="p-1.5 hover:bg-blue-50 text-gray-600 hover:text-blue-600 rounded transition-colors" title={isFullscreen ? "Exit Fullscreen" : "Fullscreen"}>
+                  {isFullscreen ? <Minimize2 size={16}/> : <Maximize size={16}/>}
+              </button>
               <div className="h-[1px] bg-gray-200 mx-1 my-0.5"></div>
+              <button onClick={() => setIsEditing(true)} className="p-1.5 hover:bg-blue-50 text-gray-600 hover:text-blue-600 rounded transition-colors" title="Edit Diagram"><Edit2 size={16}/></button>
               <button onClick={zoomIn} className="p-1.5 hover:bg-gray-100 rounded text-gray-600" title="Zoom In"><ZoomIn size={16}/></button>
               <button onClick={resetView} className="p-1.5 hover:bg-gray-100 rounded text-gray-600" title="Reset View"><RotateCcw size={16}/></button>
               <button onClick={zoomOut} className="p-1.5 hover:bg-gray-100 rounded text-gray-600" title="Zoom Out"><ZoomOut size={16}/></button>

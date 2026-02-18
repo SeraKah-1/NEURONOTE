@@ -1,6 +1,6 @@
 
 import { createClient, SupabaseClient } from '@supabase/supabase-js';
-import { HistoryItem, SavedQueue, NoteMode, Folder, SavedPrompt } from '../types';
+import { HistoryItem, SavedQueue, NoteMode, Folder, SavedPrompt, KnowledgeSource, KnowledgeFile } from '../types';
 
 export class StorageService {
   private static instance: StorageService;
@@ -54,6 +54,55 @@ export class StorageService {
   public isCloudReady() {
     return this.isSupabaseReady;
   }
+
+  /* ========================================================================
+     KNOWLEDGE BASE (RAG) STORAGE
+  ======================================================================== */
+  
+  public getKnowledgeSources(): KnowledgeSource[] {
+    try {
+        const stored = localStorage.getItem('neuro_kb_sources');
+        return stored ? JSON.parse(stored) : [];
+    } catch { return []; }
+  }
+
+  public saveKnowledgeSource(source: KnowledgeSource) {
+      const sources = this.getKnowledgeSources();
+      const idx = sources.findIndex(s => s.id === source.id);
+      if (idx >= 0) sources[idx] = source;
+      else sources.push(source);
+      localStorage.setItem('neuro_kb_sources', JSON.stringify(sources));
+  }
+
+  public deleteKnowledgeSource(id: string) {
+      const sources = this.getKnowledgeSources().filter(s => s.id !== id);
+      localStorage.setItem('neuro_kb_sources', JSON.stringify(sources));
+      // Also delete associated files (mock)
+      const files = this.getKnowledgeFiles(id);
+      // In a real app, delete these. For now, we rely on filtering by sourceId.
+  }
+
+  public getKnowledgeFiles(sourceId: string): KnowledgeFile[] {
+      try {
+          const stored = localStorage.getItem(`neuro_kb_files_${sourceId}`);
+          return stored ? JSON.parse(stored) : [];
+      } catch { return []; }
+  }
+
+  public saveKnowledgeFiles(sourceId: string, files: KnowledgeFile[]) {
+      // Append or Update
+      const existing = this.getKnowledgeFiles(sourceId);
+      const updated = [...existing];
+      
+      files.forEach(f => {
+          const idx = updated.findIndex(ex => ex.id === f.id);
+          if (idx >= 0) updated[idx] = f;
+          else updated.push(f);
+      });
+      
+      localStorage.setItem(`neuro_kb_files_${sourceId}`, JSON.stringify(updated));
+  }
+
 
   /* ========================================================================
      AUTO-TAGGING HEURISTICS & PARSING
